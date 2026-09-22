@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <title>Scraping Workbench</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+
+<body>
+  <header>
+    <strong>Scraping Workbench</strong>
+    <span>Left: <a href="/?oc" target="_blank">opencode serve</a> (credentials auto-injected)</span>
+    <span>Right: scraped files viewer</span>
+  </header>
+  <main>
+    <div id="left">
+      <iframe src="/?oc" title="opencode"></iframe>
+    </div>
+    <div id="right">
+      <div id="toolbar">
+        <select id="fileSelect"></select>
+        <button id="refreshBtn">Refresh</button>
+        <label><input type="checkbox" id="autoRefresh"> auto</label>
+        <span id="status"></span>
+      </div>
+      <div id="content" class="empty">Select a file to preview.</div>
+    </div>
+  </main>
+  <script src="/js/app.js"></script>
+</body>
+
+</html>

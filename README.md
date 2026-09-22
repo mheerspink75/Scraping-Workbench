@@ -7,8 +7,23 @@ A split-screen web scraping workbench:
 
 ## Requirements
 
-- Python 3.10+ (standard library only, no dependencies)
+- Python 3.10+ (the workbench itself is standard library only)
 - `opencode` CLI v2 (on `PATH`)
+- Scraper dependencies: `pip install -r requirements.txt` (ideally in a venv)
+
+## Scrapers
+
+| Folder | Site | Script |
+|--------|------|--------|
+| `scrapers/az_job_search/` | azjobconnection.gov | `az_job_scraper.py` (modes: `html`, `browser`) |
+| `scrapers/linkedin_job_search/` | LinkedIn (guest API) | `linkedin_job_scraper.py` |
+| `scrapers/indeed_job_search/` | Indeed | `indeed_job_scraper.py` |
+| `scrapers/example/` | template | `scraper.py` — copy to start a new scraper |
+
+Each runs standalone (e.g. `python3 scrapers/indeed_job_search/indeed_job_scraper.py`)
+and writes `.md` + `.csv` results into its own `output/` folder, which the
+viewer picks up automatically. LinkedIn/Indeed actively rate-limit and block
+bots — expect occasional 429/403 responses; the scrapers back off and retry.
 
 ## Quick start
 
@@ -44,7 +59,8 @@ Requests to the app port are routed as follows:
 
 | Path                | Handled by                                       |
 |---------------------|--------------------------------------------------|
-| `/`                 | Workbench split-screen UI                        |
+| `/`                 | Workbench split-screen UI (`static/index.html`)  |
+| `/css/*`, `/js/*`   | Workbench static assets (`static/`)              |
 | `/?oc`              | opencode UI (proxied; used by the iframe)        |
 | `/api/files`        | File list (scans the working directory)          |
 | `/api/file?path=..` | File content (path-traversal protected)          |
@@ -65,18 +81,40 @@ protocol upgrades (WebSockets) in both directions. opencode's absolute asset
 export OPENCODE_SERVER_PASSWORD=workbench
 opencode serve --port 4096 --hostname 127.0.0.1 &
 python3 app.py --port 8080 --opencode-url http://127.0.0.1:4096 \
-               --opencode-password workbench --dir .
+               --opencode-password workbench --dir ./scrapers
 ```
+
+## Project structure
+
+```
+scrapers/
+├── app.py                 workbench server (UI + file API + opencode proxy)
+├── start_workbench.sh     launcher
+├── static/
+│   ├── index.html         split-screen page
+│   ├── css/style.css
+│   └── js/app.js          viewer logic (file list, markdown/CSV rendering)
+└── scrapers/              one folder per website/scraper
+    └── example/           ← template: copy this to start a new scraper
+        ├── scraper.py     the scraper (writes results into ./output/)
+        └── output/        generated results, shown in the viewer (gitignored)
+```
+
+### Adding a new scraper
+
+```bash
+mkdir -p scrapers/mysite/output
+cp scrapers/example/scraper.py scrapers/mysite/scraper.py
+# edit scrapers/mysite/scraper.py to target your site; write .md/.csv into ./output/
+```
+
+Each `scrapers/<name>/scraper.py` must write its results into its own
+`output/` directory as Markdown and/or CSV — everything under `scrapers/`
+appears in the workbench viewer automatically.
 
 ## File viewer
 
-The right pane recursively scans the working directory (skipping hidden
-folders) for `.md`, `.markdown`, `.csv`, `.tsv`, `.json`, and `.txt` files.
-Use **Refresh** to rescan manually, or enable **auto** to poll every 3
-seconds — new scrape results appear as soon as the model writes them.
-
-## Files
-
-- `app.py` — workbench server (UI + file API + opencode reverse proxy)
-- `start_workbench.sh` — launcher that starts both processes with cleanup on exit
-- `results/` — sample scraped output (put your scrape results here)
+The right pane recursively scans `scrapers/` (skipping hidden folders) for
+`.md`, `.markdown`, `.csv`, `.tsv`, `.json`, and `.txt` files. Use **Refresh**
+to rescan manually, or enable **auto** to poll every 3 seconds — new scrape
+results appear as soon as a scraper writes them.
