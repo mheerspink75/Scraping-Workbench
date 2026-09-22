@@ -34,10 +34,12 @@ SEARCH_PARAMS = {
     "f_E": "1,2",          # internship + entry level
     "sortBy": "DD",        # most recent
 }
+REMOTE_PARAMS = {"f_WT": "2"}  # LinkedIn work-type filter: 2 = remote
 RESULTS_PER_PAGE = 25     # LinkedIn guest API paging step
 MAX_PAGES = 10
 REQUEST_DELAY = 3.0
 MAX_REQUEST_RETRIES = 4
+HEADLESS = False
 
 
 # --- FILTERS (same rules as the AZ scraper) ---
@@ -84,7 +86,7 @@ def extract_jobs_from_page(html):
 
         company_el = card.select_one("h4.base-search-card__subtitle")
         location_el = card.select_one("span.job-search-card__location")
-        job_id = re.search(r"/jobs/view/(\d+)", href)
+        job_id = re.search(r"/jobs/view/(?:[^/?]*-)?(\d+)", href)
 
         jobs.append({
             "title": title,
@@ -155,7 +157,7 @@ def scrape_all_browser():
 
     all_jobs, seen_ids = [], set()
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=HEADLESS)
         page = browser.new_page(viewport={"width": 1400, "height": 1200})
         try:
             for i in range(MAX_PAGES):
@@ -181,15 +183,59 @@ def scrape_all_browser():
     return all_jobs
 
 
-def filter_jobs(jobs):
+def detail_is_remote(link):
+    """Check a job's detail page (guest API) for remote work indicators.
+
+    LinkedIn ignores f_WT=2 for anonymous requests, so the only reliable way
+    to detect remote jobs as a guest is to fetch each posting and look for
+    'Remote' in the text (e.g. location shows 'United States (Remote)').
+    """
+    m = re.search(r"/jobs/view/(?:[^/?]*-)?(\d+)", link)
+    if not m:
+        return False
+    url = f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{m.group(1)}"
+    for attempt in range(3):
+        try:
+            resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=REQUEST_TIMEOUT)
+        except requests.RequestException:
+            return False
+        if resp.status_code == 200:
+            break
+        if resp.status_code == 429:
+            wait = 10 * (attempt + 1)
+            print(f"    [!] detail 429 rate-limited; waiting {wait}s")
+            time.sleep(wait)
+            continue
+        print(f"    [!] detail request blocked/failed (HTTP {resp.status_code})")
+        return False
+    else:
+        return False
+    text = BeautifulSoup(resp.text, "html.parser").get_text(" ", strip=True).lower()
+    return "remote" in text
+
+
+def filter_jobs(jobs, remote_only=False):
     filtered = []
-    for job in jobs:
+    skipped = {"senior": 0, "not-software": 0, "not-remote": 0}
+    for i, job in enumerate(jobs, start=1):
         if "senior" in job["title"].lower():
+            skipped["senior"] += 1
             continue
         if not is_software_engineering(job["title"]):
+            skipped["not-software"] += 1
             continue
+        # Remote filtering must be done per-posting; f_WT is ignored by the
+        # anonymous endpoints (verified empirically).
+        if remote_only:
+            print(f"  [remote-check] {i}/{len(jobs)}: {job['title']}")
+            if not detail_is_remote(job["link"]):
+                skipped["not-remote"] += 1
+                continue
+            time.sleep(1.5)  # polite delay between detail requests
         filtered.append(job)
-    print(f"[+] Filtered to {len(filtered)} jobs (software roles, excluding senior titles)")
+    print(f"[+] Filtered to {len(filtered)} jobs "
+          f"(skipped: {skipped['senior']} senior, {skipped['not-software']} non-software, "
+          f"{skipped['not-remote']} non-remote)")
     return filtered
 
 
@@ -224,21 +270,30 @@ def write_csv(jobs, filename=None):
 
 
 def main():
-    global MAX_PAGES
+    global MAX_PAGES, HEADLESS
     parser = argparse.ArgumentParser(description="LinkedIn job scraper")
     parser.add_argument("--mode", choices=["html", "browser"], default="html",
                         help="html = fast requests; browser = Playwright Chromium (harder to block)")
     parser.add_argument("--keywords", default=SEARCH_PARAMS["keywords"])
     parser.add_argument("--location", default=SEARCH_PARAMS["location"])
+    parser.add_argument("--remote", action="store_true",
+                        help="Search fully remote jobs (adds f_WT=2, location=United States)")
     parser.add_argument("--max-pages", type=int, default=MAX_PAGES)
+    parser.add_argument("--headless", action="store_true",
+                        help="Run browser mode without a visible window (browser mode only)")
     args = parser.parse_args()
 
     SEARCH_PARAMS["keywords"] = args.keywords
-    SEARCH_PARAMS["location"] = args.location
+    if args.remote:
+        SEARCH_PARAMS.update(REMOTE_PARAMS)
+        SEARCH_PARAMS["location"] = "United States"
+    else:
+        SEARCH_PARAMS["location"] = args.location
     MAX_PAGES = max(1, args.max_pages)
+    HEADLESS = args.headless
 
     all_jobs = scrape_all() if args.mode == "html" else scrape_all_browser()
-    filtered = filter_jobs(all_jobs)
+    filtered = filter_jobs(all_jobs, remote_only=args.remote)
     write_markdown(filtered)
     write_csv(filtered)
 
