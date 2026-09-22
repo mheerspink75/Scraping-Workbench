@@ -211,7 +211,17 @@ def detail_is_remote(link):
     else:
         return False
     text = BeautifulSoup(resp.text, "html.parser").get_text(" ", strip=True).lower()
-    return "remote" in text
+    # LinkedIn's guest API exposes no structured workplace-type field, and
+    # matching bare "remote" in the body produces false positives (hybrid,
+    # "field/remote" teams, "work remotely part of the week"). Require an
+    # explicit fully-remote marker instead.
+    remote_markers = [
+        "(remote)", "remote-first", "fully remote", "100% remote",
+        "this is a remote", "remote position", "remote role",
+        "remote opportunity", "location: remote",
+        "remote job", "us-remote", "li-remote",
+    ]
+    return any(m in text for m in remote_markers)
 
 
 def filter_jobs(jobs, remote_only=False):
