@@ -142,17 +142,50 @@ def scrape_all():
     return all_jobs
 
 
+STATE_FILE = os.path.join(OUTPUT_DIR, ".browser-state.json")
+
+
+def _wait_for_job_cards(page, timeout_ms=180000):
+    """Wait for Indeed to show real job cards.
+
+    When Cloudflare shows a Turnstile challenge ("Just a moment..."), a human
+    must click the checkbox. In headed mode we wait patiently (default 3 min);
+    in headless mode the challenge can't be solved, so we fail fast.
+    """
+    budget = 30000 if HEADLESS else timeout_ms
+    waited = 0
+    step = 5000
+    while waited < budget:
+        page.wait_for_timeout(step)
+        waited += step
+        html = page.content()
+        if "job_seen_beacon" in html:
+            return True
+        if "Just a moment" in html or "cf-chl" in html:
+            if HEADLESS:
+                return False
+            if waited % 15000 == 0:
+                print("  [challenge] Cloudflare check shown — click the "
+                      "'Verify you are human' checkbox in the browser window...")
+    return False
+
+
 def scrape_all_browser():
     """Fetch pages with a real browser (Playwright) instead of raw requests.
 
     Recommended for Indeed: Cloudflare blocks most plain-requests traffic
-    (HTTP 403). Runs headed Chromium so the check can be solved manually if
-    a challenge appears.
+    (HTTP 403). On the first headed run a human may need to click the
+    Turnstile checkbox once; the resulting clearance cookie is saved to
+    output/.browser-state.json and reused afterwards.
     """
     if sync_playwright is None:
         raise RuntimeError(
             "Playwright is not installed. Run: pip install playwright && playwright install chromium"
         )
+
+    storage_state = STATE_FILE if os.path.exists(STATE_FILE) else None
+    if storage_state:
+        print("[browser] Reusing saved session state (Cloudflare clearance)")
 
     all_jobs, seen_ids = [], set()
     with sync_playwright() as p:
@@ -163,6 +196,7 @@ def scrape_all_browser():
                        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
             locale="en-US",
             timezone_id="America/Phoenix",
+            storage_state=storage_state,
         )
         page = ctx.new_page()
         try:
@@ -171,8 +205,11 @@ def scrape_all_browser():
                 url = BASE_URL + "?" + urllib.parse.urlencode(params)
                 print(f"[browser] Fetching page {i + 1} (start={params['start']})")
                 page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                # Headed mode: solve the Cloudflare challenge manually if shown.
-                page.wait_for_timeout(8000)  # let Cloudflare/JS settle
+
+                if not _wait_for_job_cards(page):
+                    print("[browser] No job cards (challenge unsolved?), stopping.")
+                    break
+                ctx.storage_state(path=STATE_FILE)
 
                 jobs = extract_jobs_from_page(page.content())
                 new_jobs = [j for j in jobs if j["posting_number"] not in seen_ids]
