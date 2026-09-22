@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Environment / secrets
+.env
+.server-password
+
+# Scrape results (generated, not source) — keep the folder itself
+results/*
+!results/.gitkeep
+
+# Logs
+*.log
+
+# OS noise
+.DS_Store
+Thumbs.db
