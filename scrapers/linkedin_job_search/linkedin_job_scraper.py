@@ -15,9 +15,15 @@ import csv
 import os
 import re
 import time
+import urllib.parse
 
 import requests
 from bs4 import BeautifulSoup
+
+try:
+    from playwright.sync_api import sync_playwright
+except Exception:  # pragma: no cover - optional dependency
+    sync_playwright = None
 
 BASE_URL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
@@ -136,6 +142,45 @@ def scrape_all():
     return all_jobs
 
 
+def scrape_all_browser():
+    """Fetch pages with a real browser (Playwright) instead of raw requests.
+
+    Slower but far less likely to be blocked, since LinkedIn sees a genuine
+    Chromium client. Uses the same guest-API endpoint and parser as HTML mode.
+    """
+    if sync_playwright is None:
+        raise RuntimeError(
+            "Playwright is not installed. Run: pip install playwright && playwright install chromium"
+        )
+
+    all_jobs, seen_ids = [], set()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        page = browser.new_page(viewport={"width": 1400, "height": 1200})
+        try:
+            for i in range(MAX_PAGES):
+                params = {**SEARCH_PARAMS, "start": i * RESULTS_PER_PAGE}
+                url = BASE_URL + "?" + urllib.parse.urlencode(params)
+                print(f"[browser] Fetching page {i + 1} (start={params['start']})")
+                page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(2000)
+
+                jobs = extract_jobs_from_page(page.content())
+                new_jobs = [j for j in jobs if j["posting_number"] not in seen_ids]
+                for job in new_jobs:
+                    seen_ids.add(job["posting_number"])
+                if not new_jobs:
+                    print("[browser] No new jobs, stopping.")
+                    break
+                all_jobs.extend(new_jobs)
+                time.sleep(REQUEST_DELAY)
+        finally:
+            browser.close()
+
+    print(f"[+] Total jobs scraped: {len(all_jobs)}")
+    return all_jobs
+
+
 def filter_jobs(jobs):
     filtered = []
     for job in jobs:
@@ -181,6 +226,8 @@ def write_csv(jobs, filename=None):
 def main():
     global MAX_PAGES
     parser = argparse.ArgumentParser(description="LinkedIn job scraper")
+    parser.add_argument("--mode", choices=["html", "browser"], default="html",
+                        help="html = fast requests; browser = Playwright Chromium (harder to block)")
     parser.add_argument("--keywords", default=SEARCH_PARAMS["keywords"])
     parser.add_argument("--location", default=SEARCH_PARAMS["location"])
     parser.add_argument("--max-pages", type=int, default=MAX_PAGES)
@@ -190,7 +237,7 @@ def main():
     SEARCH_PARAMS["location"] = args.location
     MAX_PAGES = max(1, args.max_pages)
 
-    all_jobs = scrape_all()
+    all_jobs = scrape_all() if args.mode == "html" else scrape_all_browser()
     filtered = filter_jobs(all_jobs)
     write_markdown(filtered)
     write_csv(filtered)

@@ -9,15 +9,20 @@ A split-screen web scraping workbench:
 
 - Python 3.10+ (the workbench itself is standard library only)
 - `opencode` CLI v2 (on `PATH`)
-- Scraper dependencies: `pip install -r requirements.txt` (ideally in a venv)
+- Scraper dependencies: `pip install -r requirements.txt playwright && playwright install chromium`
+  (a `.venv` is included in `.gitignore`; run scripts with `.venv/bin/python`)
 
 ## Scrapers
 
 | Folder | Site | Script |
 |--------|------|--------|
-| `scrapers/az_job_search/` | azjobconnection.gov | `az_job_scraper.py` (modes: `html`, `browser`) |
+| `scrapers/az_job_search/` | azjobconnection.gov | `az_job_scraper.py` |
 | `scrapers/linkedin_job_search/` | LinkedIn (guest API) | `linkedin_job_scraper.py` |
 | `scrapers/indeed_job_search/` | Indeed | `indeed_job_scraper.py` |
+
+All job scrapers support `--mode html` (fast `requests`) or `--mode browser`
+(Playwright Chromium — harder for LinkedIn/Indeed bot detection to block;
+Indeed mode runs headed so you can solve any Cloudflare challenge manually).
 | `scrapers/example/` | template | `scraper.py` — copy to start a new scraper |
 
 Each runs standalone (e.g. `python3 scrapers/indeed_job_search/indeed_job_scraper.py`)
