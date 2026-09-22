@@ -8,9 +8,9 @@ venv/
 .env
 .server-password
 
-# Scrape results (generated, not source) — keep the folder itself
-results/*
-!results/.gitkeep
+# Scrape results (generated, not source) — keep the output folders themselves
+scrapers/*/output/*
+!scrapers/*/output/.gitkeep
 
 # Logs
 *.log

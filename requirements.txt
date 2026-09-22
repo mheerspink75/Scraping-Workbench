@@ -1,0 +1,5 @@
+# Python dependencies for the job scrapers (the workbench itself needs none)
+requests
+beautifulsoup4
+# Optional: for the AZ scraper's --mode browser
+# playwright

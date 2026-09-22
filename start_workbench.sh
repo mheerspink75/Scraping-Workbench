@@ -25,7 +25,7 @@ python3 app.py \
   --port "${APP_PORT}" \
   --opencode-url "http://127.0.0.1:${OPENCODE_PORT}" \
   --opencode-password "${OPENCODE_SERVER_PASSWORD}" \
-  --dir . &
+  --dir ./scrapers &
 APP_PID=$!
 
 echo
