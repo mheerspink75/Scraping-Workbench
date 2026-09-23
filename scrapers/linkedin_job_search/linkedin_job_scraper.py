@@ -7,11 +7,13 @@ Results are written to ./output/ (jobs.md + jobs.csv) so they appear in the
 workbench viewer. Note: LinkedIn rate-limits aggressively; large crawls may
 be blocked (HTTP 429) — keep --max-pages small.
 
-By default, searches for junior/entry-level roles near --location (Scottsdale,
-AZ) merged with fully remote roles nationwide. Pass --remote to search remote
-jobs only.
+By default, searches for junior/entry-level/associate roles near --location
+(Scottsdale, AZ) merged with fully remote roles nationwide using three search
+strategies (the guest API ignores f_WT=2, so we also inject "remote" as a
+keyword and as a location value). Pass --remote to search remote jobs only.
 
 Usage:  python3 scrapers/linkedin_job_search/linkedin_job_scraper.py
+        python3 ... --remote --time-filter 30d --max-pages 5
 """
 
 import argparse
@@ -36,7 +38,8 @@ LOCAL_LOCATION = "Scottsdale, Arizona, United States"
 SEARCH_PARAMS = {
     "keywords": "Software Developer",
     "location": LOCAL_LOCATION,
-    "f_E": "1,2",          # internship + entry level
+    "f_E": "1,2,3",        # internship + entry level + associate
+    "f_TPR": "r2592000",    # last 30 days (configurable via --time-filter)
     "sortBy": "DD",        # most recent
 }
 REMOTE_PARAMS = {"f_WT": "2"}  # LinkedIn work-type filter: 2 = remote
@@ -63,11 +66,63 @@ def is_software_engineering(title):
 
 def is_junior_level(title):
     t = title.lower()
-    if re.search(r"\bsenior\b|\bstaff\b|\bprincipal\b|\blead\b|\bmanager\b|\bdirector\b|\barchitect\b", t):
+    if re.search(r"\b(?:senior|sr|snr|staff|principal|lead|manager|director|architect)\b", t):
         return False
     if re.search(r"\b(?:iii|iv|v|3|4|5)\b", t):
         return False
     return True
+
+
+US_STATES = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+    "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+    "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+    "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+    "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+    "DC", "PR", "VI", "GU", "AS", "MP",
+}
+
+
+NEAR_SCOTTSDALE_PATTERNS = [
+    r"\bscottsdale\b",
+    r"\bphoenix\b",
+    r"\btempe\b",
+    r"\bmesa\b",
+    r"\bchandler\b",
+    r"\bgilbert\b",
+    r"\bglendale\b",
+    r"\bpeoria\b",
+    r"\bparadise valley\b",
+    r"\barizona\b",
+    r",\s*az\b",
+]
+
+
+def is_near_scottsdale(location):
+    """Check if location is Scottsdale or in the surrounding Arizona metro area."""
+    if not location:
+        return False
+    low = location.lower()
+    return any(re.search(p, low) for p in NEAR_SCOTTSDALE_PATTERNS)
+
+
+def is_us_location(location):
+    """Return True if the location string appears to be in the United States."""
+    if not location:
+        return False
+    loc = location.strip()
+    low = loc.lower()
+    # "United States", "USA", "U.S." anywhere in the string
+    if re.search(r"\b(?:united states|usa|u\.s\.a?)\b", low):
+        return True
+    # Bare "Remote" or "Remote, ..." or "Remote (..."
+    if low == "remote" or low.startswith("remote,") or low.startswith("remote ("):
+        return True
+    # Check for ", ST" pattern (US state abbreviation, allowing trailing qualifiers like (Hybrid))
+    match = re.search(r",\s*([A-Z]{2})(?:\s*\(.*|\s+.*|$)", loc)
+    if match and match.group(1) in US_STATES:
+        return True
+    return False
 
 
 def infer_experience_years(text):
@@ -137,7 +192,7 @@ def _dedup_key(job):
     return job["posting_number"] or job["link"]
 
 
-def scrape_all(params=None):
+def scrape_all(params=None, source_tag="local"):
     search_params = params if params is not None else SEARCH_PARAMS
     session = requests.Session()
     session.headers["User-Agent"] = "Mozilla/5.0"
@@ -153,6 +208,8 @@ def scrape_all(params=None):
             break
 
         jobs = extract_jobs_from_page(resp.text)
+        for job in jobs:
+            job.setdefault("_source", source_tag)
         new_jobs = [j for j in jobs if _dedup_key(j) not in seen_ids]
         for job in new_jobs:
             seen_ids.add(_dedup_key(job))
@@ -167,17 +224,31 @@ def scrape_all(params=None):
 
 
 def scrape_local_and_remote():
-    """Merge a Scottsdale-area search with a fully-remote search, deduped."""
-    local_params = {**SEARCH_PARAMS, "location": LOCAL_LOCATION}
-    remote_params = {**SEARCH_PARAMS, **REMOTE_PARAMS, "location": "United States"}
+    """Merge local + two remote search strategies, deduped.
 
-    print("[+] Searching near Scottsdale, AZ...")
-    local_jobs = scrape_all(local_params)
-    print("[+] Searching fully remote...")
-    remote_jobs = scrape_all(remote_params)
+    Uses three search strategies to work around the guest API ignoring f_WT=2:
+    1. Local search (near configured location)
+    2. location="Remote" search (LinkedIn treats "Remote" as a location)
+    3. Keywords with "remote" injected + location="United States"
+    """
+    local_params = {**SEARCH_PARAMS, "location": LOCAL_LOCATION}
+    remote_loc_params = {**SEARCH_PARAMS, **REMOTE_PARAMS, "location": "Remote"}
+    remote_kw_params = {
+        **SEARCH_PARAMS,
+        **REMOTE_PARAMS,
+        "keywords": SEARCH_PARAMS["keywords"] + " remote",
+        "location": "United States",
+    }
+
+    print("[+] Strategy 1/3: Searching near local area...")
+    local_jobs = scrape_all(local_params, source_tag="local")
+    print("[+] Strategy 2/3: Searching with location='Remote'...")
+    remote_loc_jobs = scrape_all(remote_loc_params, source_tag="remote")
+    print("[+] Strategy 3/3: Searching with 'remote' keyword...")
+    remote_kw_jobs = scrape_all(remote_kw_params, source_tag="remote")
 
     seen, merged = set(), []
-    for job in local_jobs + remote_jobs:
+    for job in local_jobs + remote_loc_jobs + remote_kw_jobs:
         key = _dedup_key(job)
         if key in seen:
             continue
@@ -185,6 +256,36 @@ def scrape_local_and_remote():
         merged.append(job)
 
     print(f"[+] Combined total (deduped): {len(merged)}")
+    return merged
+
+
+def scrape_remote_multi():
+    """Multi-strategy remote-only search (no local jobs)."""
+    remote_wt_params = {**SEARCH_PARAMS, **REMOTE_PARAMS, "location": "United States"}
+    remote_loc_params = {**SEARCH_PARAMS, **REMOTE_PARAMS, "location": "Remote"}
+    remote_kw_params = {
+        **SEARCH_PARAMS,
+        **REMOTE_PARAMS,
+        "keywords": SEARCH_PARAMS["keywords"] + " remote",
+        "location": "United States",
+    }
+
+    print("[+] Strategy 1/3: f_WT=2 + location='United States'...")
+    jobs1 = scrape_all(remote_wt_params, source_tag="remote")
+    print("[+] Strategy 2/3: location='Remote'...")
+    jobs2 = scrape_all(remote_loc_params, source_tag="remote")
+    print("[+] Strategy 3/3: 'remote' keyword + location='United States'...")
+    jobs3 = scrape_all(remote_kw_params, source_tag="remote")
+
+    seen, merged = set(), []
+    for job in jobs1 + jobs2 + jobs3:
+        key = _dedup_key(job)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(job)
+
+    print(f"[+] Combined remote total (deduped): {len(merged)}")
     return merged
 
 
@@ -273,32 +374,49 @@ def is_remote_job(job):
 
 def filter_jobs(jobs, remote_only=False, require_local_or_remote=False):
     filtered = []
-    skipped = {"senior": 0, "not-software": 0, "not-remote": 0, "not-local-or-remote": 0}
+    skipped = {"senior": 0, "not-software": 0, "not-us": 0, "not-remote": 0, "not-local-or-remote": 0}
     local_city = LOCAL_LOCATION.split(",")[0].lower()
     for i, job in enumerate(jobs, start=1):
         if not is_junior_level(job["title"]):
             skipped["senior"] += 1
             continue
+        if infer_experience_years(job["title"]) == "4+ years":
+            skipped["senior"] += 1
+            continue
         if not is_software_engineering(job["title"]):
             skipped["not-software"] += 1
             continue
-        # Remote filtering must be done per-posting; f_WT is ignored by the
-        # anonymous endpoints (verified empirically).
+        if not is_us_location(job.get("location", "")):
+            skipped["not-us"] += 1
+            continue
+        # Remote filtering: trust the search-source tag for jobs from
+        # remote-targeted searches; only detail-fetch for ambiguous ones.
         if remote_only:
-            print(f"  [remote-check] {i}/{len(jobs)}: {job['title']}")
-            if not is_remote_job(job):
+            loc = job.get("location", "").lower()
+            if job.get("_source") == "remote" or "remote" in loc:
+                pass  # trusted remote from search source or location tag
+            elif "hybrid" in loc:
                 skipped["not-remote"] += 1
                 continue
-            time.sleep(1.5)  # polite delay between detail requests
+            else:
+                print(f"  [remote-check] {i}/{len(jobs)}: {job['title']}")
+                if not is_remote_job(job):
+                    skipped["not-remote"] += 1
+                    continue
+                time.sleep(1.5)  # polite delay between detail requests
         elif require_local_or_remote:
             loc = job.get("location", "").lower()
-            if local_city not in loc and "remote" not in loc:
+            is_remote_source = job.get("_source") == "remote"
+            is_remote_loc = "remote" in loc
+            is_local = is_near_scottsdale(loc)
+            if not is_remote_source and not is_remote_loc and not is_local:
                 skipped["not-local-or-remote"] += 1
                 continue
         filtered.append(job)
     print(f"[+] Filtered to {len(filtered)} jobs "
           f"(skipped: {skipped['senior']} senior/non-junior, {skipped['not-software']} non-software, "
-          f"{skipped['not-remote']} non-remote, {skipped['not-local-or-remote']} not local-or-remote)")
+          f"{skipped['not-us']} non-US, {skipped['not-remote']} non-remote, "
+          f"{skipped['not-local-or-remote']} not local-or-remote)")
     return filtered
 
 
@@ -340,20 +458,28 @@ def main():
     parser.add_argument("--keywords", default=SEARCH_PARAMS["keywords"])
     parser.add_argument("--location", default=SEARCH_PARAMS["location"])
     parser.add_argument("--remote", action="store_true",
-                        help="Search fully remote jobs only (adds f_WT=2, location=United States)")
+                        help="Search fully remote jobs only (multi-strategy: keyword + location)")
     parser.add_argument("--max-pages", type=int, default=MAX_PAGES)
     parser.add_argument("--headless", action="store_true",
                         help="Run browser mode without a visible window (browser mode only)")
+    parser.add_argument("--time-filter", default="30d",
+                        choices=["1h", "24h", "7d", "30d", "none"],
+                        help="How far back to search (default: 30d)")
     args = parser.parse_args()
 
     SEARCH_PARAMS["keywords"] = args.keywords
     MAX_PAGES = max(1, args.max_pages)
     HEADLESS = args.headless
 
+    # Apply time filter
+    time_filters = {"1h": "r3600", "24h": "r86400", "7d": "r604800", "30d": "r2592000"}
+    if args.time_filter == "none":
+        SEARCH_PARAMS.pop("f_TPR", None)
+    else:
+        SEARCH_PARAMS["f_TPR"] = time_filters.get(args.time_filter, "r2592000")
+
     if args.remote:
-        SEARCH_PARAMS.update(REMOTE_PARAMS)
-        SEARCH_PARAMS["location"] = "United States"
-        all_jobs = scrape_all() if args.mode == "html" else scrape_all_browser()
+        all_jobs = scrape_remote_multi() if args.mode == "html" else scrape_all_browser()
         filtered = filter_jobs(all_jobs, remote_only=True)
     else:
         # Default: jobs near --location (Scottsdale, AZ) merged with fully remote jobs
