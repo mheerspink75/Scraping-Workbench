@@ -14,29 +14,47 @@ import os
 import re
 import time
 import urllib.parse
+from dataclasses import dataclass
 
 import requests
 from bs4 import BeautifulSoup
 
 try:
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
     from playwright.sync_api import sync_playwright
-except Exception:  # pragma: no cover - optional dependency
+except ImportError:  # pragma: no cover - optional dependency
     sync_playwright = None
+    PlaywrightTimeoutError = Exception
 
 BASE_URL = "https://www.indeed.com/jobs"
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+STATE_FILE = os.path.join(OUTPUT_DIR, ".browser-state.json")
 REQUEST_TIMEOUT = 60
-SEARCH_PARAMS = {
-    "q": "Software Developer",
-    "l": "Scottsdale, AZ",
-    "radius": "25",
-    "sort": "date",
-}
 RESULTS_PER_PAGE = 10
-MAX_PAGES = 10
 REQUEST_DELAY = 5.0
 MAX_REQUEST_RETRIES = 4
-HEADLESS = False
+TRANSIENT_STATUSES = {403, 429, 500, 502, 503, 504}
+
+
+@dataclass
+class ScraperConfig:
+    """Runtime options for a scrape run (replaces mutated module globals)."""
+
+    keywords: str = "Software Developer"
+    location: str = "Scottsdale, AZ"
+    radius: str = "25"
+    sort: str = "date"
+    max_pages: int = 10
+    headless: bool = False
+
+    @property
+    def search_params(self):
+        return {
+            "q": self.keywords,
+            "l": self.location,
+            "radius": self.radius,
+            "sort": self.sort,
+        }
 
 
 # --- FILTERS (same rules as the AZ scraper) ---
@@ -83,35 +101,76 @@ def extract_jobs_from_page(html):
         snippet_el = card.select_one("div.job-snippet")
         snippet = " ".join(snippet_el.get_text(" ", strip=True).split()) if snippet_el else ""
 
+        company = company_el.get_text(" ", strip=True) if company_el else ""
         jobs.append({
             "title": title,
-            "company": company_el.get_text(" ", strip=True) if company_el else "",
+            "company": company,
             "location": location_el.get_text(" ", strip=True) if location_el else "",
             "posting_number": job_key,
+            # Fall back to title+company when data-jk is missing, otherwise all
+            # keyless cards collapse into a single dedup entry.
+            "dedup_key": job_key or f"{title}|{company}",
             "experience_years": infer_experience_years(f"{title} {snippet}"),
             "link": href,
-            "raw_text": f"{title} {snippet}",
         })
     return jobs
 
 
 def fetch_page_with_backoff(session, params):
+    """GET a search page, retrying only transient/blocked responses.
+
+    Non-transient statuses (400, 404, ...) fail fast instead of burning
+    retries. Returns the response regardless of status; callers decide
+    whether the body is usable.
+    """
     for attempt in range(1, MAX_REQUEST_RETRIES + 1):
         try:
             resp = session.get(BASE_URL, params=params, timeout=REQUEST_TIMEOUT)
-            if resp.status_code in {403, 429, 500, 502, 503, 504}:
-                raise requests.HTTPError(f"{resp.status_code} transient/blocked")
-            return resp
         except requests.RequestException as exc:
             if attempt == MAX_REQUEST_RETRIES:
                 raise RuntimeError(f"Request failed after {MAX_REQUEST_RETRIES} attempts: {exc}") from exc
-            backoff = min(60, 2 ** attempt * 3)
-            print(f"[!] Retrying in {backoff}s (attempt {attempt + 1}/{MAX_REQUEST_RETRIES})")
-            time.sleep(backoff)
+        else:
+            if resp.status_code not in TRANSIENT_STATUSES:
+                return resp
+            if attempt == MAX_REQUEST_RETRIES:
+                raise RuntimeError(
+                    f"Blocked/transient HTTP {resp.status_code} after {MAX_REQUEST_RETRIES} attempts"
+                )
+        backoff = min(60, 2 ** attempt * 3)
+        print(f"[!] Retrying in {backoff}s (attempt {attempt + 1}/{MAX_REQUEST_RETRIES})")
+        time.sleep(backoff)
     raise RuntimeError("Unreachable request handler state")
 
 
-def scrape_all():
+def scrape_pages(fetch_html, config):
+    """Shared pagination/dedup loop.
+
+    fetch_html(params) returns page HTML, or None to stop pagination.
+    """
+    all_jobs, seen_keys = [], set()
+    for page in range(config.max_pages):
+        params = {**config.search_params, "start": page * RESULTS_PER_PAGE}
+        print(f"[+] Fetching page {page + 1} (start={params['start']})")
+        html = fetch_html(params)
+        if html is None:
+            print(f"[!] Page {page + 1} failed, stopping.")
+            break
+
+        jobs = extract_jobs_from_page(html)
+        new_jobs = [j for j in jobs if j["dedup_key"] not in seen_keys]
+        seen_keys.update(j["dedup_key"] for j in new_jobs)
+        if not new_jobs:
+            print("[+] No new jobs, stopping.")
+            break
+        all_jobs.extend(new_jobs)
+        if page < config.max_pages - 1:
+            time.sleep(REQUEST_DELAY)
+
+    print(f"[+] Total jobs scraped: {len(all_jobs)}")
+    return all_jobs
+
+
+def scrape_all(config):
     session = requests.Session()
     session.headers["User-Agent"] = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -119,50 +178,32 @@ def scrape_all():
     )
     session.headers["Accept-Language"] = "en-US,en;q=0.9"
 
-    all_jobs, seen_ids = [], set()
-    for page in range(MAX_PAGES):
-        params = {**SEARCH_PARAMS, "start": page * RESULTS_PER_PAGE}
-        print(f"[+] Fetching page {page + 1} (start={params['start']})")
+    def fetch_html(params):
         resp = fetch_page_with_backoff(session, params)
-        if resp.status_code != 200:
-            print(f"[!] Page {page + 1} failed ({resp.status_code}), stopping.")
-            break
+        return resp.text if resp.status_code == 200 else None
 
-        jobs = extract_jobs_from_page(resp.text)
-        new_jobs = [j for j in jobs if j["posting_number"] not in seen_ids]
-        for job in new_jobs:
-            seen_ids.add(job["posting_number"])
-        if not new_jobs:
-            print("[+] No new jobs, stopping.")
-            break
-        all_jobs.extend(new_jobs)
-        time.sleep(REQUEST_DELAY)
-
-    print(f"[+] Total jobs scraped: {len(all_jobs)}")
-    return all_jobs
+    return scrape_pages(fetch_html, config)
 
 
-STATE_FILE = os.path.join(OUTPUT_DIR, ".browser-state.json")
-
-
-def _wait_for_job_cards(page, timeout_ms=180000):
+def _wait_for_job_cards(page, headless, timeout_ms=180000):
     """Wait for Indeed to show real job cards.
 
     When Cloudflare shows a Turnstile challenge ("Just a moment..."), a human
     must click the checkbox. In headed mode we wait patiently (default 3 min);
     in headless mode the challenge can't be solved, so we fail fast.
     """
-    budget = 30000 if HEADLESS else timeout_ms
+    budget = 30000 if headless else timeout_ms
     waited = 0
     step = 5000
     while waited < budget:
-        page.wait_for_timeout(step)
-        waited += step
-        html = page.content()
-        if "job_seen_beacon" in html:
+        try:
+            page.wait_for_selector("div.job_seen_beacon", timeout=step)
             return True
+        except PlaywrightTimeoutError:
+            waited += step
+        html = page.content()
         if "Just a moment" in html or "cf-chl" in html:
-            if HEADLESS:
+            if headless:
                 return False
             if waited % 15000 == 0:
                 print("  [challenge] Cloudflare check shown — click the "
@@ -170,7 +211,7 @@ def _wait_for_job_cards(page, timeout_ms=180000):
     return False
 
 
-def scrape_all_browser():
+def scrape_all_browser(config):
     """Fetch pages with a real browser (Playwright) instead of raw requests.
 
     Recommended for Indeed: Cloudflare blocks most plain-requests traffic
@@ -187,9 +228,8 @@ def scrape_all_browser():
     if storage_state:
         print("[browser] Reusing saved session state (Cloudflare clearance)")
 
-    all_jobs, seen_ids = [], set()
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=HEADLESS)
+        browser = p.chromium.launch(headless=config.headless)
         ctx = browser.new_context(
             viewport={"width": 1366, "height": 900},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -199,32 +239,21 @@ def scrape_all_browser():
             storage_state=storage_state,
         )
         page = ctx.new_page()
+
+        def fetch_html(params):
+            url = BASE_URL + "?" + urllib.parse.urlencode(params)
+            print(f"[browser] URL: {url}")
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            if not _wait_for_job_cards(page, config.headless):
+                print("[browser] No job cards (challenge unsolved?), stopping.")
+                return None
+            ctx.storage_state(path=STATE_FILE)
+            return page.content()
+
         try:
-            for i in range(MAX_PAGES):
-                params = {**SEARCH_PARAMS, "start": i * RESULTS_PER_PAGE}
-                url = BASE_URL + "?" + urllib.parse.urlencode(params)
-                print(f"[browser] Fetching page {i + 1} (start={params['start']})")
-                page.goto(url, wait_until="domcontentloaded", timeout=60000)
-
-                if not _wait_for_job_cards(page):
-                    print("[browser] No job cards (challenge unsolved?), stopping.")
-                    break
-                ctx.storage_state(path=STATE_FILE)
-
-                jobs = extract_jobs_from_page(page.content())
-                new_jobs = [j for j in jobs if j["posting_number"] not in seen_ids]
-                for job in new_jobs:
-                    seen_ids.add(job["posting_number"])
-                if not new_jobs:
-                    print("[browser] No new jobs, stopping.")
-                    break
-                all_jobs.extend(new_jobs)
-                time.sleep(REQUEST_DELAY)
+            return scrape_pages(fetch_html, config)
         finally:
             browser.close()
-
-    print(f"[+] Total jobs scraped: {len(all_jobs)}")
-    return all_jobs
 
 
 def filter_jobs(jobs):
@@ -270,25 +299,27 @@ def write_csv(jobs, filename=None):
 
 
 def main():
-    global MAX_PAGES, HEADLESS
+    defaults = ScraperConfig()
     parser = argparse.ArgumentParser(description="Indeed job scraper")
     parser.add_argument("--mode", choices=["html", "browser"], default="html",
                         help="html = fast requests (often blocked by Cloudflare); browser = Playwright Chromium")
-    parser.add_argument("--keywords", default=SEARCH_PARAMS["q"])
-    parser.add_argument("--location", default=SEARCH_PARAMS["l"])
+    parser.add_argument("--keywords", default=defaults.keywords)
+    parser.add_argument("--location", default=defaults.location)
     parser.add_argument("--remote", action="store_true",
                         help="Search fully remote jobs (location=Remote)")
-    parser.add_argument("--max-pages", type=int, default=MAX_PAGES)
+    parser.add_argument("--max-pages", type=int, default=defaults.max_pages)
     parser.add_argument("--headless", action="store_true",
                         help="Run browser mode without a visible window (browser mode only)")
     args = parser.parse_args()
 
-    SEARCH_PARAMS["q"] = args.keywords
-    SEARCH_PARAMS["l"] = "Remote" if args.remote else args.location
-    MAX_PAGES = max(1, args.max_pages)
-    HEADLESS = args.headless
+    config = ScraperConfig(
+        keywords=args.keywords,
+        location="Remote" if args.remote else args.location,
+        max_pages=max(1, args.max_pages),
+        headless=args.headless,
+    )
 
-    all_jobs = scrape_all() if args.mode == "html" else scrape_all_browser()
+    all_jobs = scrape_all(config) if args.mode == "html" else scrape_all_browser(config)
     filtered = filter_jobs(all_jobs)
     write_markdown(filtered)
     write_csv(filtered)
