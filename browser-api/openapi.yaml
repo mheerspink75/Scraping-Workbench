@@ -1,0 +1,580 @@
+openapi: 3.1.0
+info:
+  title: Sandboxed Browser Interaction API
+  version: 0.1.0
+  description: Local, permission-gated browser automation with isolated Playwright sessions.
+servers:
+  - url: http://127.0.0.1:8787
+security:
+  - apiSecret: []
+tags:
+  - name: Browser
+  - name: Sessions
+  - name: Permissions
+  - name: Workflows
+paths:
+  /healthz:
+    get:
+      tags: [Browser]
+      operationId: health
+      security: []
+      responses:
+        '200':
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, service]
+                properties:
+                  ok: { type: boolean }
+                  service: { type: string }
+  /browser/session/start:
+    post:
+      tags: [Sessions]
+      operationId: startSession
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SessionStartRequest' }
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionState' }
+        '400': { $ref: '#/components/responses/Error' }
+  /browser/session/end:
+    post:
+      tags: [Sessions]
+      operationId: endSession
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SessionEndRequest' }
+      responses:
+        '200':
+          description: Session ended
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ended, sessionId]
+                properties:
+                  ended: { type: boolean }
+                  sessionId: { type: string, format: uuid }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /browser/session:
+    get:
+      tags: [Sessions]
+      operationId: getSession
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      responses:
+        '200':
+          description: Current session
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session]
+                properties:
+                  session: { $ref: '#/components/schemas/SessionState' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /browser/sessions:
+    get:
+      tags: [Sessions]
+      operationId: listSessions
+      security: [{ apiSecret: [], approvalSecret: [] }]
+      responses:
+        '200':
+          description: Administrative session list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions:
+                    type: array
+                    items: { $ref: '#/components/schemas/SessionState' }
+        '403': { $ref: '#/components/responses/Error' }
+  /browser/permission/request:
+    post:
+      tags: [Permissions]
+      operationId: requestPermission
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PermissionRequest' }
+      responses:
+        '202':
+          description: Pending approval
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PendingPermission' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+  /browser/permissions:
+    get:
+      tags: [Permissions]
+      operationId: listPendingPermissions
+      security: [{ apiSecret: [], approvalSecret: [] }]
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      responses:
+        '200':
+          description: Pending permission requests
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pending]
+                properties:
+                  pending:
+                    type: array
+                    items: { $ref: '#/components/schemas/PendingPermission' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /browser/permission/approve:
+    post:
+      tags: [Permissions]
+      operationId: approvePermission
+      security: [{ apiSecret: [], approvalSecret: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PermissionDecision' }
+      responses:
+        '200':
+          description: Scoped token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PermissionTokenResponse' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /browser/permission/deny:
+    post:
+      tags: [Permissions]
+      operationId: denyPermission
+      security: [{ apiSecret: [], approvalSecret: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PermissionDecision' }
+      responses:
+        '204': { description: Permission denied }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /browser/action:
+    post:
+      tags: [Browser]
+      operationId: browserAction
+      parameters:
+        - { $ref: '#/components/parameters/SessionId' }
+        - { $ref: '#/components/parameters/PermissionToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ActionRequest' }
+      responses:
+        '200':
+          description: Action completed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, action, result]
+                properties:
+                  ok: { type: boolean }
+                  action: { $ref: '#/components/schemas/ActionName' }
+                  result: { type: object, additionalProperties: true }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '504': { $ref: '#/components/responses/Error' }
+  /browser/dom:
+    get:
+      tags: [Browser]
+      operationId: getDom
+      parameters:
+        - { $ref: '#/components/parameters/SessionId' }
+        - name: tabId
+          in: query
+          required: true
+          schema: { type: integer, minimum: 0 }
+        - name: sessionId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Bounded DOM snapshot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DomSnapshot' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /browser/query:
+    post:
+      tags: [Browser]
+      operationId: queryBrowser
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QueryRequest' }
+      responses:
+        '200':
+          description: Matched elements
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QueryResponse' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /browser/eval:
+    post:
+      tags: [Browser]
+      operationId: evaluateBrowser
+      parameters:
+        - { $ref: '#/components/parameters/SessionId' }
+        - { $ref: '#/components/parameters/PermissionToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EvalRequest' }
+      responses:
+        '200':
+          description: Serialized sandbox result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, value]
+                properties:
+                  ok: { type: boolean }
+                  value: {}
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '408': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
+  /browser/workflow:
+    post:
+      tags: [Workflows]
+      operationId: runWorkflow
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WorkflowRequest' }
+      responses:
+        '200':
+          description: Ordered workflow result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkflowResult' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /browser/workflow/{workflowId}:
+    get:
+      tags: [Workflows]
+      operationId: getWorkflow
+      parameters:
+        - { $ref: '#/components/parameters/SessionId' }
+        - name: workflowId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Workflow state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkflowResult' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+components:
+  securitySchemes:
+    apiSecret:
+      type: apiKey
+      in: header
+      name: x-browser-api-secret
+    approvalSecret:
+      type: apiKey
+      in: header
+      name: x-browser-approval-secret
+  parameters:
+    SessionId:
+      name: x-browser-session
+      in: header
+      required: true
+      schema: { type: string, format: uuid }
+    PermissionToken:
+      name: x-permission-token
+      in: header
+      required: false
+      schema: { type: string, minLength: 20, maxLength: 512 }
+  responses:
+    Error:
+      description: Structured API error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+  schemas:
+    ActionName:
+      type: string
+      enum: [click, type, navigate, scroll, extract, evaluate, waitFor, screenshot]
+    ActionRequest:
+      type: object
+      additionalProperties: false
+      required: [action, tabId]
+      properties:
+        action: { $ref: '#/components/schemas/ActionName' }
+        selector: { type: [string, 'null'], maxLength: 1000 }
+        text: { type: [string, 'null'], maxLength: 20000 }
+        url: { type: [string, 'null'], maxLength: 2048 }
+        tabId: { type: integer, minimum: 0 }
+        permissionToken: { type: string, minLength: 20, maxLength: 512 }
+        sessionId: { type: string, format: uuid }
+    QueryRequest:
+      type: object
+      additionalProperties: false
+      required: [selector, tabId]
+      properties:
+        selector: { type: string, minLength: 1, maxLength: 1000 }
+        tabId: { type: integer, minimum: 0 }
+        sessionId: { type: string, format: uuid }
+    EvalRequest:
+      type: object
+      additionalProperties: false
+      required: [code, tabId]
+      properties:
+        code: { type: string, minLength: 1, maxLength: 50000 }
+        tabId: { type: integer, minimum: 0 }
+        permissionToken: { type: string, minLength: 20, maxLength: 512 }
+        sessionId: { type: string, format: uuid }
+    SessionStartRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        metadata:
+          type: object
+          additionalProperties: { type: string, maxLength: 200 }
+    SessionEndRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        sessionId: { type: string, format: uuid }
+    PermissionRequest:
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [click, type, navigate, evaluate]
+        tabId: { type: integer, minimum: 0 }
+        selector: { type: [string, 'null'], maxLength: 1000 }
+        text: { type: [string, 'null'], maxLength: 50000 }
+        url: { type: [string, 'null'], maxLength: 2048 }
+        reason: { type: string, maxLength: 500 }
+    PermissionDecision:
+      type: object
+      additionalProperties: false
+      required: [requestId]
+      properties:
+        requestId: { type: string, format: uuid }
+        ttlMs: { type: integer, minimum: 1000, maximum: 300000 }
+    PermissionScope:
+      type: object
+      additionalProperties: false
+      required: [sessionId, tabId, action, requestHash]
+      properties:
+        sessionId: { type: string, format: uuid }
+        tabId: { type: integer, minimum: 0 }
+        action: { $ref: '#/components/schemas/ActionName' }
+        requestHash: { type: string, minLength: 64, maxLength: 64 }
+    PermissionTokenResponse:
+      type: object
+      additionalProperties: false
+      required: [token, requestId, scope, issuedAt, expiresAt]
+      properties:
+        token: { type: string }
+        requestId: { type: string, format: uuid }
+        scope: { $ref: '#/components/schemas/PermissionScope' }
+        issuedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+    PendingPermission:
+      type: object
+      additionalProperties: false
+      required: [requestId, sessionId, tabId, action, requestHash, summary, createdAt, expiresAt]
+      properties:
+        requestId: { type: string, format: uuid }
+        sessionId: { type: string, format: uuid }
+        tabId: { type: integer, minimum: 0 }
+        action: { $ref: '#/components/schemas/ActionName' }
+        requestHash: { type: string, minLength: 64, maxLength: 64 }
+        summary:
+          type: object
+          additionalProperties: false
+          properties:
+            selector: { type: string }
+            url: { type: string }
+            textLength: { type: integer, minimum: 0 }
+        reason: { type: string }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+    Rect:
+      type: object
+      additionalProperties: false
+      required: [x, y, width, height]
+      properties:
+        x: { type: number }
+        y: { type: number }
+        width: { type: number }
+        height: { type: number }
+    DomElement:
+      type: object
+      additionalProperties: false
+      required: [tag, text, attributes, visible]
+      properties:
+        tag: { type: string }
+        id: { type: string }
+        role: { type: string }
+        text: { type: string }
+        attributes:
+          type: object
+          additionalProperties: { type: [string, boolean] }
+        visible: { type: boolean }
+        rect: { $ref: '#/components/schemas/Rect' }
+    DomSnapshot:
+      type: object
+      additionalProperties: false
+      required: [tabId, url, title, visibleElementCount, elements, truncated, capturedAt]
+      properties:
+        tabId: { type: integer, minimum: 0 }
+        url: { type: string }
+        title: { type: string }
+        visibleElementCount: { type: integer, minimum: 0 }
+        elements:
+          type: array
+          maxItems: 5000
+          items: { $ref: '#/components/schemas/DomElement' }
+        truncated: { type: boolean }
+        capturedAt: { type: string, format: date-time }
+    QueryMatch:
+      allOf:
+        - $ref: '#/components/schemas/DomElement'
+        - type: object
+          required: [index]
+          properties:
+            index: { type: integer, minimum: 0 }
+    QueryResponse:
+      type: object
+      additionalProperties: false
+      required: [tabId, selector, count, matches, truncated]
+      properties:
+        tabId: { type: integer, minimum: 0 }
+        selector: { type: string }
+        count: { type: integer, minimum: 0 }
+        matches:
+          type: array
+          items: { $ref: '#/components/schemas/QueryMatch' }
+        truncated: { type: boolean }
+    WorkflowRequest:
+      type: object
+      additionalProperties: false
+      required: [steps]
+      properties:
+        workflowId: { type: string, format: uuid }
+        steps:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { $ref: '#/components/schemas/ActionRequest' }
+        stopOnError: { type: boolean, default: true }
+    WorkflowStepResult:
+      type: object
+      additionalProperties: false
+      required: [index, action, ok]
+      properties:
+        index: { type: integer, minimum: 0 }
+        action: { $ref: '#/components/schemas/ActionName' }
+        ok: { type: boolean }
+        result: { type: object, additionalProperties: true }
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+    WorkflowResult:
+      type: object
+      additionalProperties: false
+      required: [workflowId, sessionId, status, currentStep, steps, startedAt]
+      properties:
+        workflowId: { type: string, format: uuid }
+        sessionId: { type: string, format: uuid }
+        status: { type: string, enum: [running, completed, failed, denied] }
+        currentStep: { type: integer, minimum: 0 }
+        steps:
+          type: array
+          items: { $ref: '#/components/schemas/WorkflowStepResult' }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+    SessionState:
+      type: object
+      additionalProperties: false
+      required: [sessionId, tabId, createdAt, expiresAt, permissions]
+      properties:
+        sessionId: { type: string, format: uuid }
+        tabId: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        permissions:
+          type: object
+          additionalProperties: false
+          required: [pending, active]
+          properties:
+            pending: { type: integer, minimum: 0 }
+            active: { type: integer, minimum: 0 }
+        activeWorkflow:
+          type: object
+          additionalProperties: false
+          required: [workflowId, currentStep, status]
+          properties:
+            workflowId: { type: string, format: uuid }
+            currentStep: { type: integer, minimum: 0 }
+            status: { type: string, enum: [running, completed, failed, denied] }
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            requestId: { type: string }
+            details: {}
