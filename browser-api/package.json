@@ -1,0 +1,32 @@
+{
+  "name": "scraping-workbench-browser-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A minimal, permissioned browser interaction API built with TypeScript, Express, and Playwright.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node -e \"const r=process.env.npm_config_local_prefix||process.cwd(); require(r + '/scripts/run.cjs')\" dev",
+    "build": "node -e \"const r=process.env.npm_config_local_prefix||process.cwd(); require(r + '/scripts/run.cjs')\" build",
+    "start": "node -e \"const r=process.env.npm_config_local_prefix||process.cwd(); require(r + '/scripts/run.cjs')\" start",
+    "lint": "node -e \"const r=process.env.npm_config_local_prefix||process.cwd(); require(r + '/scripts/run.cjs')\" lint",
+    "test": "node -e \"const r=process.env.npm_config_local_prefix||process.cwd(); require(r + '/scripts/run.cjs')\" test",
+    "test:unit": "node -e \"const r=process.env.npm_config_local_prefix||process.cwd(); require(r + '/scripts/run.cjs')\" test:unit",
+    "test:integration": "node -e \"const r=process.env.npm_config_local_prefix||process.cwd(); require(r + '/scripts/run.cjs')\" test:integration"
+  },
+  "dependencies": {
+    "acorn": "^8.14.0",
+    "express": "^5.1.0",
+    "playwright": "^1.63.0",
+    "quickjs-emscripten": "^0.32.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/acorn": "^4.0.6",
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.0"
+  }
+}

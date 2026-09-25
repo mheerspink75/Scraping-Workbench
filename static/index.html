@@ -1,33 +1,187 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>Scraping Workbench</title>
   <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/app.js" defer></script>
 </head>
 
 <body>
-  <header>
-    <strong>Scraping Workbench</strong>
-    <span>Left: <a href="/?oc" target="_blank">opencode serve</a> (credentials auto-injected)</span>
-    <span>Right: scraped files viewer</span>
+  <header class="app-bar">
+    <a class="brand" href="/" aria-label="Scraping Workbench home">
+      <span class="brand-mark" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </span>
+      <span class="brand-copy">
+        <strong>Scraping Workbench</strong>
+        <small>Scrape, inspect, refine</small>
+      </span>
+    </a>
+
+    <div class="app-actions">
+      <span class="local-badge"><span aria-hidden="true"></span>Local workspace</span>
+      <button class="button button-quiet" id="collapseLeftBtn" type="button" aria-pressed="false">
+        Hide OpenCode
+      </button>
+      <button class="icon-button" id="themeToggle" type="button" aria-label="Use dark theme" title="Toggle theme">
+        <span aria-hidden="true">◐</span>
+      </button>
+      <a class="button button-secondary" href="/?oc" target="_blank" rel="noreferrer">
+        Open OpenCode <span aria-hidden="true">↗</span>
+      </a>
+    </div>
   </header>
-  <main>
-    <div id="left">
-      <iframe src="/?oc" title="opencode"></iframe>
-    </div>
-    <div id="right">
-      <div id="toolbar">
-        <select id="fileSelect"></select>
-        <button id="refreshBtn">Refresh</button>
-        <label><input type="checkbox" id="autoRefresh"> auto</label>
-        <span id="status"></span>
+
+  <nav class="mobile-tabs" aria-label="Workspace panes">
+    <button type="button" data-mobile-pane="left" aria-pressed="false">OpenCode</button>
+    <button type="button" data-mobile-pane="right" aria-pressed="true">Results</button>
+  </nav>
+
+  <main id="workspace" data-mobile-pane="right">
+    <section id="leftPane" class="workspace-pane" aria-label="OpenCode workspace">
+      <div class="pane-bar">
+        <div>
+          <span class="pane-kicker">Agent</span>
+          <strong>OpenCode</strong>
+        </div>
+        <a href="/?oc" target="_blank" rel="noreferrer" title="Open OpenCode in a new tab">↗</a>
       </div>
-      <div id="content" class="empty">Select a file to preview.</div>
-    </div>
+      <iframe src="/?oc" title="OpenCode" allow="clipboard-read; clipboard-write"></iframe>
+    </section>
+
+    <div
+      id="divider"
+      class="divider"
+      role="separator"
+      aria-label="Resize OpenCode and results panes"
+      aria-orientation="vertical"
+      aria-valuemin="25"
+      aria-valuemax="75"
+      aria-valuenow="44"
+      tabindex="0"
+    ></div>
+
+    <section id="rightPane" class="workspace-pane inspector" aria-label="Scraping results inspector">
+      <header class="inspector-header">
+        <div class="run-heading">
+          <div class="run-icon" aria-hidden="true">↳</div>
+          <div class="run-heading-copy">
+            <span class="section-label">Result inspector</span>
+            <h1 id="runTitle">Loading results…</h1>
+            <p id="runMeta">Scanning output files</p>
+          </div>
+        </div>
+
+        <div class="inspector-actions">
+          <span id="status" class="status" role="status" aria-live="polite">Connecting…</span>
+          <button
+            class="icon-button"
+            id="autoRefreshBtn"
+            type="button"
+            aria-label="Automatically refresh results"
+            aria-pressed="false"
+            title="Automatically refresh results"
+          >
+            <span aria-hidden="true">⟳</span>
+          </button>
+          <button class="icon-button" id="refreshBtn" type="button" aria-label="Refresh results" title="Refresh results">
+            <span aria-hidden="true">↻</span>
+          </button>
+        </div>
+
+        <div class="run-controls">
+          <label class="run-select-label" for="runSelect">Result set</label>
+          <select id="runSelect" aria-label="Choose a scraper result set" disabled>
+            <option>Loading result sets…</option>
+          </select>
+        </div>
+
+        <nav class="view-tabs" role="tablist" aria-label="Result views">
+          <button id="overviewTab" type="button" role="tab" data-view="overview" aria-selected="true" aria-controls="content">
+            Overview
+          </button>
+          <button id="resultsTab" type="button" role="tab" data-view="results" aria-selected="false" aria-controls="content" hidden>
+            Results
+          </button>
+          <button id="reportTab" type="button" role="tab" data-view="report" aria-selected="false" aria-controls="content" hidden>
+            Report
+          </button>
+          <button id="rawTab" type="button" role="tab" data-view="raw" aria-selected="false" aria-controls="content">
+            Raw
+          </button>
+        </nav>
+      </header>
+
+      <div id="refreshNotice" class="refresh-notice" role="status" hidden>
+        <span>Newer output is available.</span>
+        <button type="button" id="dismissNoticeBtn">Dismiss</button>
+      </div>
+
+      <section id="content" class="content" tabindex="-1" aria-live="polite" aria-busy="true">
+        <div class="loading-state" aria-label="Loading results">
+          <span class="spinner" aria-hidden="true"></span>
+          <strong>Loading result inspector</strong>
+          <span>Reading the latest scrape output…</span>
+        </div>
+      </section>
+
+      <aside id="detailDrawer" class="detail-drawer" aria-labelledby="drawerTitle" hidden>
+        <header class="drawer-header">
+          <div>
+            <span class="section-label">Record details</span>
+            <h2 id="drawerTitle">Result</h2>
+            <p id="drawerSubtitle"></p>
+          </div>
+          <button class="icon-button" id="closeDrawerBtn" type="button" aria-label="Close record details">×</button>
+        </header>
+        <div id="drawerContent" class="drawer-content"></div>
+        <footer class="drawer-actions">
+          <button class="button button-secondary" id="copyRecordBtn" type="button">Copy JSON</button>
+          <button class="button button-primary" id="askRecordBtn" type="button">Ask OpenCode</button>
+        </footer>
+      </aside>
+    </section>
   </main>
-  <script src="/js/app.js"></script>
+
+  <dialog id="opencodeDialog" class="prompt-dialog" aria-labelledby="opencodeDialogTitle">
+    <form method="dialog">
+      <header class="dialog-header">
+        <div>
+          <span class="section-label">OpenCode bridge</span>
+          <h2 id="opencodeDialogTitle">Send result context to OpenCode</h2>
+        </div>
+        <button class="icon-button" value="cancel" aria-label="Close dialog">×</button>
+      </header>
+
+      <div class="dialog-body">
+        <p class="dialog-intro">
+          Choose where the context should go. The message is editable and scraped values are marked as untrusted data.
+        </p>
+        <label class="field-label" for="opencodeSession">Session</label>
+        <select id="opencodeSession" aria-describedby="opencodeSessionHelp">
+          <option value="">Loading sessions…</option>
+        </select>
+        <p id="opencodeSessionHelp" class="field-help">A new session will use this workbench directory.</p>
+
+        <label class="field-label" for="promptText">Message</label>
+        <textarea id="promptText" rows="9" spellcheck="false"></textarea>
+        <p id="opencodeError" class="form-error" role="alert" hidden></p>
+      </div>
+
+      <footer class="dialog-actions">
+        <button class="button button-secondary" value="cancel">Cancel</button>
+        <button class="button button-primary" id="sendPromptBtn" type="button">Send message</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <noscript>This workbench requires JavaScript to inspect and filter scrape results.</noscript>
 </body>
 
 </html>

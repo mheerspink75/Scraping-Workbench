@@ -1,0 +1,28 @@
+{
+  "name": "scraping-workbench-copilot-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A strict, local-only forwarding bridge from Copilot to the sandboxed Browser Interaction API.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node -e \"const r=process.env.npm_config_local_prefix||process.cwd(); require(r + '/scripts/run.cjs')\" dev",
+    "build": "node -e \"const r=process.env.npm_config_local_prefix||process.cwd(); require(r + '/scripts/run.cjs')\" build",
+    "start": "node -e \"const r=process.env.npm_config_local_prefix||process.cwd(); require(r + '/scripts/run.cjs')\" start",
+    "lint": "node -e \"const r=process.env.npm_config_local_prefix||process.cwd(); require(r + '/scripts/run.cjs')\" lint",
+    "test": "node -e \"const r=process.env.npm_config_local_prefix||process.cwd(); require(r + '/scripts/run.cjs')\" test",
+    "test:unit": "node -e \"const r=process.env.npm_config_local_prefix||process.cwd(); require(r + '/scripts/run.cjs')\" test:unit",
+    "test:integration": "node -e \"const r=process.env.npm_config_local_prefix||process.cwd(); require(r + '/scripts/run.cjs')\" test:integration"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.0"
+  }
+}
