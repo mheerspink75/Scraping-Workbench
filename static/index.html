@@ -24,47 +24,13 @@
 
     <div class="app-actions">
       <span class="local-badge"><span aria-hidden="true"></span>Local workspace</span>
-      <button class="button button-quiet" id="collapseLeftBtn" type="button" aria-pressed="false">
-        Hide OpenCode
-      </button>
       <button class="icon-button" id="themeToggle" type="button" aria-label="Use dark theme" title="Toggle theme">
         <span aria-hidden="true">◐</span>
       </button>
-      <a class="button button-secondary" href="/?oc" target="_blank" rel="noreferrer">
-        Open OpenCode <span aria-hidden="true">↗</span>
-      </a>
     </div>
   </header>
 
-  <nav class="mobile-tabs" aria-label="Workspace panes">
-    <button type="button" data-mobile-pane="left" aria-pressed="false">OpenCode</button>
-    <button type="button" data-mobile-pane="right" aria-pressed="true">Results</button>
-  </nav>
-
-  <main id="workspace" data-mobile-pane="right">
-    <section id="leftPane" class="workspace-pane" aria-label="OpenCode workspace">
-      <div class="pane-bar">
-        <div>
-          <span class="pane-kicker">Agent</span>
-          <strong>OpenCode</strong>
-        </div>
-        <a href="/?oc" target="_blank" rel="noreferrer" title="Open OpenCode in a new tab">↗</a>
-      </div>
-      <iframe src="/?oc" title="OpenCode" allow="clipboard-read; clipboard-write"></iframe>
-    </section>
-
-    <div
-      id="divider"
-      class="divider"
-      role="separator"
-      aria-label="Resize OpenCode and results panes"
-      aria-orientation="vertical"
-      aria-valuemin="25"
-      aria-valuemax="75"
-      aria-valuenow="44"
-      tabindex="0"
-    ></div>
-
+  <main id="workspace">
     <section id="rightPane" class="workspace-pane inspector" aria-label="Scraping results inspector">
       <header class="inspector-header">
         <div class="run-heading">
@@ -141,43 +107,10 @@
         <div id="drawerContent" class="drawer-content"></div>
         <footer class="drawer-actions">
           <button class="button button-secondary" id="copyRecordBtn" type="button">Copy JSON</button>
-          <button class="button button-primary" id="askRecordBtn" type="button">Ask OpenCode</button>
         </footer>
       </aside>
     </section>
   </main>
-
-  <dialog id="opencodeDialog" class="prompt-dialog" aria-labelledby="opencodeDialogTitle">
-    <form method="dialog">
-      <header class="dialog-header">
-        <div>
-          <span class="section-label">OpenCode bridge</span>
-          <h2 id="opencodeDialogTitle">Send result context to OpenCode</h2>
-        </div>
-        <button class="icon-button" value="cancel" aria-label="Close dialog">×</button>
-      </header>
-
-      <div class="dialog-body">
-        <p class="dialog-intro">
-          Choose where the context should go. The message is editable and scraped values are marked as untrusted data.
-        </p>
-        <label class="field-label" for="opencodeSession">Session</label>
-        <select id="opencodeSession" aria-describedby="opencodeSessionHelp">
-          <option value="">Loading sessions…</option>
-        </select>
-        <p id="opencodeSessionHelp" class="field-help">A new session will use this workbench directory.</p>
-
-        <label class="field-label" for="promptText">Message</label>
-        <textarea id="promptText" rows="9" spellcheck="false"></textarea>
-        <p id="opencodeError" class="form-error" role="alert" hidden></p>
-      </div>
-
-      <footer class="dialog-actions">
-        <button class="button button-secondary" value="cancel">Cancel</button>
-        <button class="button button-primary" id="sendPromptBtn" type="button">Send message</button>
-      </footer>
-    </form>
-  </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 

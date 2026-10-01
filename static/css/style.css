@@ -24,7 +24,6 @@
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
-  --left-width: 44%;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -283,10 +282,6 @@ select:disabled {
   color: var(--accent);
 }
 
-.mobile-tabs {
-  display: none;
-}
-
 #workspace {
   position: relative;
   height: calc(100vh - 52px);
@@ -303,12 +298,6 @@ select:disabled {
   background: var(--surface);
 }
 
-#leftPane {
-  width: var(--left-width);
-  flex: 0 0 var(--left-width);
-  overflow: hidden;
-}
-
 #rightPane {
   position: relative;
   flex: 1 1 auto;
@@ -318,95 +307,12 @@ select:disabled {
   container-type: inline-size;
 }
 
-.divider {
-  position: relative;
-  width: 7px;
-  flex: 0 0 7px;
-  border: 0;
-  background: var(--app-bg);
-  cursor: col-resize;
-  touch-action: none;
-  z-index: 8;
-}
-
-.divider::after {
-  content: "";
-  position: absolute;
-  inset: 0 2px;
-  border-radius: 2px;
-  background: var(--border-strong);
-  transition: background 140ms ease, width 140ms ease;
-}
-
-.divider:hover::after,
-.divider:focus-visible::after,
-.divider.dragging::after {
-  inset-inline: 1px;
-  background: var(--accent);
-}
-
-#workspace.left-collapsed #leftPane,
-#workspace.left-collapsed .divider {
-  width: 0;
-  flex-basis: 0;
-  overflow: hidden;
-}
-
-#workspace.left-collapsed #leftPane {
-  border: 0;
-}
-
-.pane-bar {
-  height: 38px;
-  padding: 0 10px 0 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex: 0 0 38px;
-  background: var(--surface-subtle);
-  border-bottom: 1px solid var(--border);
-}
-
-.pane-bar > div {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-}
-
-.pane-bar strong {
-  font-size: 12px;
-}
-
-.pane-bar a {
-  width: 26px;
-  height: 26px;
-  display: grid;
-  place-items: center;
-  border-radius: 5px;
-  color: var(--muted);
-  text-decoration: none;
-}
-
-.pane-bar a:hover {
-  background: var(--surface-hover);
-  color: var(--text);
-}
-
-.pane-kicker,
 .section-label {
   color: var(--muted);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-}
-
-iframe {
-  width: 100%;
-  min-height: 0;
-  flex: 1;
-  border: 0;
-  background: #fff;
 }
 
 .inspector-header {
@@ -1347,8 +1253,7 @@ iframe {
   transform: translateX(0);
 }
 
-.drawer-header,
-.dialog-header {
+.drawer-header {
   padding: 15px 16px;
   display: flex;
   align-items: flex-start;
@@ -1357,8 +1262,7 @@ iframe {
   border-bottom: 1px solid var(--border);
 }
 
-.drawer-header h2,
-.dialog-header h2 {
+.drawer-header h2 {
   margin: 2px 0 0;
   font-size: 16px;
   letter-spacing: -0.02em;
@@ -1404,95 +1308,13 @@ iframe {
   color: var(--accent);
 }
 
-.drawer-actions,
-.dialog-actions {
+.drawer-actions {
   padding: 11px 16px;
   display: flex;
   justify-content: flex-end;
   gap: 7px;
   border-top: 1px solid var(--border);
   background: var(--surface-subtle);
-}
-
-.drawer-actions .button-primary {
-  margin-left: auto;
-}
-
-.prompt-dialog {
-  width: min(620px, calc(100vw - 28px));
-  max-height: min(760px, calc(100vh - 28px));
-  padding: 0;
-  overflow: hidden;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-lg);
-  background: var(--surface-raised);
-  color: var(--text);
-  box-shadow: var(--shadow-lg);
-}
-
-.prompt-dialog::backdrop {
-  background: rgb(15 23 42 / 52%);
-  backdrop-filter: blur(3px);
-}
-
-.prompt-dialog form {
-  max-height: inherit;
-  display: flex;
-  flex-direction: column;
-}
-
-.dialog-body {
-  padding: 14px 16px 18px;
-  overflow: auto;
-}
-
-.dialog-intro,
-.field-help {
-  margin: 0 0 13px;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.field-label {
-  margin: 12px 0 5px;
-  display: block;
-  color: var(--text-soft);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.prompt-dialog select,
-.prompt-dialog textarea {
-  width: 100%;
-  border: 1px solid var(--border-strong);
-  border-radius: 7px;
-  background: var(--surface-subtle);
-  color: var(--text);
-}
-
-.prompt-dialog select {
-  height: 36px;
-  padding: 0 9px;
-  font-size: 12px;
-}
-
-.prompt-dialog textarea {
-  min-height: 180px;
-  padding: 10px;
-  resize: vertical;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-.form-error {
-  margin: 9px 0 0;
-  padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--border));
-  border-radius: 6px;
-  background: var(--danger-soft);
-  color: var(--danger);
-  font-size: 11px;
 }
 
 .toast {
@@ -1508,21 +1330,6 @@ iframe {
   box-shadow: var(--shadow-md);
   color: var(--text-soft);
   font-size: 11px;
-}
-
-.form-error + .button,
-#sendPromptBtn.is-loading span {
-  pointer-events: none;
-}
-
-#sendPromptBtn.is-loading::after {
-  content: "";
-  width: 12px;
-  height: 12px;
-  border: 2px solid rgb(255 255 255 / 45%);
-  border-top-color: #fff;
-  border-radius: 50%;
-  animation: spin 700ms linear infinite;
 }
 
 noscript {
@@ -1622,68 +1429,7 @@ noscript {
   }
 
   .brand-copy small,
-  .local-badge,
-  #collapseLeftBtn,
-  .app-actions .button-secondary {
-    display: none;
-  }
-
-  .mobile-tabs {
-    height: 38px;
-    padding: 4px;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 4px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-  }
-
-  .mobile-tabs button {
-    border: 0;
-    border-radius: 5px;
-    background: transparent;
-    color: var(--muted);
-    cursor: pointer;
-    font-size: 11px;
-    font-weight: 650;
-  }
-
-  .mobile-tabs button[aria-pressed="true"] {
-    background: var(--accent-soft);
-    color: var(--accent);
-  }
-
-  #workspace {
-    height: calc(100vh - 86px);
-  }
-
-  #leftPane,
-  #rightPane {
-    width: 100%;
-    flex: 0 0 100%;
-  }
-
-  #leftPane {
-    display: none;
-  }
-
-  #workspace[data-mobile-pane="left"] #leftPane {
-    display: flex;
-  }
-
-  #workspace[data-mobile-pane="left"] #rightPane {
-    display: none;
-  }
-
-  #workspace[data-mobile-pane="right"] #leftPane {
-    display: none;
-  }
-
-  #workspace[data-mobile-pane="right"] #rightPane {
-    display: flex;
-  }
-
-  .divider {
+  .local-badge {
     display: none;
   }
 

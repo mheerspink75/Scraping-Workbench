@@ -1,14 +1,19 @@
 # Scraping Workbench
 
-A split-screen web scraping workbench:
+A web scraping results inspector:
 
-- **Left pane:** the [opencode](https://opencode.ai) web UI (`opencode serve`), reverse-proxied with credentials auto-injected — no login prompt. Use it to direct the AI model to scrape web pages.
-- **Right pane:** a run-oriented results inspector that groups complementary output files, summarizes data quality, and provides searchable CSV/TSV tables, safe Markdown rendering, raw-file access, record details, and an OpenCode context bridge.
+- **Run-oriented inspector** that recursively scans `scrapers/` and groups
+  complementary output files, summarizes data quality, and provides searchable
+  CSV/TSV tables, safe Markdown rendering, raw-file access, and record details.
+
+The workbench is standalone and has no opencode integration. Run scrapers from
+the terminal and open the viewer to inspect their output. If you want AI help
+writing or refining scrapers, use [opencode](https://opencode.ai) alongside it —
+`opencode pair` prints a link that signs a browser into your own local server.
 
 ## Requirements
 
 - Python 3.10+ (the workbench itself is standard library only)
-- `opencode` CLI v2 (on `PATH`)
 - Scraper dependencies: `pip install -r requirements.txt playwright && playwright install chromium`
   (a `.venv` is included in `.gitignore`; run scripts with `.venv/bin/python`)
 - Optional Copilot Browser Interaction Stack: Node.js 20+ and Playwright Chromium
@@ -40,69 +45,44 @@ bots — expect occasional 429/403 responses; the scrapers back off and retry.
 
 Then open <http://127.0.0.1:8080> in your browser.
 
-**First-time setup:** in the opencode pane (left), set the server URL to
-**`http://127.0.0.1:8080`** (the proxy port, via the server/project picker in
-the opencode UI). The opencode web app otherwise opens its live event stream
-(`/api/event`) directly against the stored server URL, bypassing the proxy and
-hitting the password prompt / connection errors. No credentials are needed
-when connecting through 8080 — the proxy injects them.
-
-The script starts two processes:
-
-1. `opencode serve` on port **4096** (upstream, requires auth)
-2. `app.py` on port **8080** (workbench UI + reverse proxy)
-
 ### Configuration (environment variables)
 
-| Variable                  | Default     | Description                                   |
-|---------------------------|-------------|-----------------------------------------------|
-| `APP_PORT`                | `8080`      | Port of the workbench UI                      |
-| `OPENCODE_PORT`           | `4096`      | Port of the upstream `opencode serve`         |
-| `OPENCODE_SERVER_PASSWORD`| `workbench` | Password set on opencode and injected by proxy |
+| Variable       | Default   | Description                        |
+|----------------|-----------|------------------------------------|
+| `APP_PORT`     | `8080`    | Port of the workbench UI           |
+| `SCRAPERS_DIR` | `./scrapers` | Directory scanned for result files |
 
-## How the proxy works
+## Routes
 
-Requests to the app port are routed as follows:
+The server is read-only and serves only its own UI, assets, and file API:
 
 | Path                | Handled by                                       |
 |---------------------|--------------------------------------------------|
-| `/`                 | Workbench split-screen UI (`static/index.html`)  |
+| `/`                 | Workbench UI (`static/index.html`)               |
 | `/css/*`, `/js/*`   | Workbench static assets (`static/`)              |
-| `/?oc`              | opencode UI (proxied; used by the iframe)        |
-| `/api/files`        | Legacy flat file list                              |
-| `/api/runs`         | Run-oriented output metadata and revisions         |
-| `/api/file?path=..` | File content, table pagination, or raw output      |
-| `/api/info`         | Local integration metadata                         |
-| everything else (`/_assets/*`, `/api/*`, SPA routes, ...) | Reverse-proxied to opencode with `Authorization: Basic opencode:<password>` injected |
+| `/api/files`        | Legacy flat file list                            |
+| `/api/runs`         | Run-oriented output metadata and revisions       |
+| `/api/file?path=..` | File content, table pagination, or raw output    |
+| anything else       | `404`                                            |
 
-The iframe loads `/?oc`: `/` is a real route in the opencode SPA router, and
-the `?oc` marker tells the proxy to forward the request upstream. Loading the
-SPA at any other synthetic path breaks its client-side router.
+The server binds only to `127.0.0.1` and makes no outbound network requests.
 
-The proxy streams response bodies chunk-by-chunk as they arrive (`read1`)
-so SSE/live updates (`/api/event`) flow in real time, and it relays `101`
-protocol upgrades (WebSockets) in both directions. opencode's absolute asset
-(`/_assets/*`) and API (`/api/*`) paths resolve through the proxy automatically.
-
-## Running the pieces manually
+## Running manually
 
 ```bash
-export OPENCODE_SERVER_PASSWORD=workbench
-opencode serve --port 4096 --hostname 127.0.0.1 &
-python3 app.py --port 8080 --opencode-url http://127.0.0.1:4096 \
-               --opencode-password workbench --dir ./scrapers
+python3 app.py --port 8080 --dir ./scrapers
 ```
 
 ## Project structure
 
 ```
 scrapers/
-├── app.py                 workbench server (UI + file API + opencode proxy)
+├── app.py                 workbench server (UI + read-only file API)
 ├── start_workbench.sh     launcher
 ├── static/
-│   ├── index.html         split-screen workbench and results inspector
-│   ├── css/style.css      responsive, resizable inspector design
-│   └── js/app.js          run navigation, summaries, tables, details, OpenCode bridge
+│   ├── index.html         results inspector UI
+│   ├── css/style.css      responsive inspector design
+│   └── js/app.js          run navigation, summaries, tables, record details
 ├── browser-api/           permission-gated Playwright browser service
 ├── copilot-bridge/        validated, fixed-route Copilot forwarding service
 ├── tests/                 workbench and integration tests
@@ -126,7 +106,7 @@ appears in the workbench viewer automatically.
 
 ## Results inspector
 
-The right pane recursively scans `scrapers/` (skipping hidden folders and files)
+The inspector recursively scans `scrapers/` (skipping hidden folders and files)
 for `.md`, `.markdown`, `.csv`, `.tsv`, `.json`, and `.txt` output. Files with
 the same stem are grouped into one result set—for example, `jobs.csv` and
 `jobs.md` become complementary **Results** and **Report** views.
@@ -137,13 +117,9 @@ Each result set provides:
 - paginated CSV/TSV results with full-text search, field filters, and sorting;
 - record details in a focused side drawer;
 - safely rendered Markdown plus copy/download access to unmodified raw output;
-- an editable **Ask OpenCode** bridge that can attach the result file to a new
-  or existing OpenCode session;
 - revision-aware manual or automatic refresh that only reloads changed output.
 
-Use the divider to resize and collapse either desktop pane. On narrow screens the
-workbench switches to **OpenCode** and **Results** tabs. The theme control lets
-the inspector match a light or dark OpenCode workspace.
+The theme control switches the inspector between a light and dark workspace.
 
 ## Optional Copilot Browser Interaction Stack
 

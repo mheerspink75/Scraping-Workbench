@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
-"""Split-screen scraping workbench.
+"""Scraping workbench results inspector.
 
-Left pane  : opencode serve web UI, reverse-proxied on this same port with
-             credentials auto-injected (no login prompt).
-Right pane : run-oriented inspector for files produced by scraping.
+Serves a single-page UI for files produced by scraping and a small read-only
+file API over the result tree.
 
 Routing on the app port:
   /                 -> workbench UI (static/index.html)
   /css/*, /js/*     -> workbench static assets (static/)
-  /?oc              -> opencode UI (SPA route "/", proxied; used by the iframe)
   /api/files        -> legacy workbench file list
   /api/runs         -> run-oriented result metadata
   /api/file?path=   -> workbench file content (table, report, or raw)
-  /api/info         -> local workbench integration metadata
-  everything else (/api/session, /_assets/*, SPA routes) -> proxied to opencode
+  anything else     -> 404
 
 Project layout:
   static/                 workbench frontend (index.html, css/, js/)
@@ -22,22 +19,18 @@ Project layout:
       output/             generated results (gitignored), shown in the viewer
 
 Usage:
-    python3 app.py [--port 8080] [--opencode-url http://127.0.0.1:4096]
-                   [--opencode-password workbench] [--dir .]
+    python3 app.py [--port 8080] [--dir .]
 
 No third-party dependencies (Python standard library only).
 """
 
 import argparse
-import base64
 import csv
 import datetime
 import hashlib
-import http.client
 import io
 import json
 import os
-import select
 import urllib.parse
 
 from collections import Counter
@@ -53,11 +46,6 @@ FACET_HEADERS = {
 FORMAT_PRIORITY = {"table": 0, "report": 1, "json": 2, "text": 3}
 SPECIAL_WORDS = {"az": "AZ", "linkedin": "LinkedIn", "indeed": "Indeed"}
 
-# Headers that must not be forwarded verbatim between client and upstream.
-HOP_BY_HOP = {
-    "connection", "keep-alive", "transfer-encoding", "te",
-    "trailer", "upgrade", "proxy-authorization", "proxy-authenticate",
-}
 
 def is_safe_path(root: str, path: str) -> bool:
     """Ensure path is a file inside root (no directory traversal)."""
@@ -348,9 +336,6 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     root_dir = "./scrapers"
     static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-    upstream_host = "127.0.0.1"
-    upstream_port = 4096
-    upstream_auth = ""  # "Basic ..." header value injected into proxied requests
 
     def _serve_static(self, rel):
         """Serve a file from static/ (no traversal allowed)."""
@@ -413,12 +398,6 @@ class Handler(BaseHTTPRequestHandler):
             headers={"ETag": f'"{revision}"'},
         )
 
-    def _handle_info(self):
-        self._send_json({
-            "opencode_directory": os.path.dirname(os.path.abspath(__file__)),
-            "result_root": self.root_dir,
-        })
-
     def _handle_file(self, path, params):
         if not path or not is_safe_path(self.root_dir, path):
             self._send_json({"error": "invalid path"}, 400)
@@ -459,104 +438,27 @@ class Handler(BaseHTTPRequestHandler):
                 {**metadata, "type": file_type, "text": text}, headers=headers
             )
 
-    # ---------- reverse proxy to opencode ----------
-
-    def _proxy(self):
-        length = int(self.headers.get("Content-Length") or 0)
-        body = self.rfile.read(length) if length else None
-
-        headers = {
-            k: v for k, v in self.headers.items()
-            if k.lower() not in HOP_BY_HOP and k.lower() != "host"
-        }
-        if self.upstream_auth:
-            headers["Authorization"] = self.upstream_auth
-
-        try:
-            conn = http.client.HTTPConnection(
-                self.upstream_host, self.upstream_port, timeout=None)
-            conn.request(self.command, self.path, body=body, headers=headers)
-            resp = conn.getresponse()
-        except OSError:
-            self._send_json({"error": "opencode upstream unreachable"}, 502)
-            return
-
-        self.send_response(resp.status)
-        for key, value in resp.getheaders():
-            if key.lower() not in HOP_BY_HOP:
-                self.send_header(key, value)
-        self.end_headers()
-
-        if resp.status == 101:
-            # WebSocket (or other protocol upgrade): relay raw bytes both ways.
-            self._relay_upgrade(conn.sock)
-            return
-
-        # Stream the response body; connection close marks the end when no
-        # Content-Length/Transfer-Encoding was forwarded.
-        self.close_connection = True
-        try:
-            while True:
-                # read1() returns as soon as ANY data is available; read(n)
-                # would block waiting for the full n bytes, stalling SSE.
-                chunk = resp.read1(65536)
-                if not chunk:
-                    break
-                self.wfile.write(chunk)
-                self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-        finally:
-            conn.close()
-
-    def _relay_upgrade(self, upstream_sock):
-        client = self.connection
-        try:
-            client.setblocking(False)
-            upstream_sock.setblocking(False)
-            sockets = [client, upstream_sock]
-            while True:
-                readable, _, _ = select.select(sockets, [], [], 300)
-                if not readable:
-                    break
-                for sock in readable:
-                    data = sock.recv(65536)
-                    if not data:
-                        return
-                    (upstream_sock if sock is client else client).sendall(data)
-        except OSError:
-            pass
-        finally:
-            self.close_connection = True
-
     # ---------- routing ----------
 
     def _route(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
-        if path == "/" and "oc" in parsed.query.split("&"):
-            # The iframe loads "/?oc": "/" is a real SPA route, the marker
-            # tells the proxy this request is meant for opencode.
-            self._proxy()
-        elif path in ("/", "/index.html"):
+        if path in ("/", "/index.html"):
             self._serve_static("index.html")
         elif path == "/api/files":
             self._handle_files()
         elif path == "/api/runs":
             self._handle_runs(query)
-        elif path == "/api/info":
-            self._handle_info()
         elif path == "/api/file":
             self._handle_file(query.get("path", [""])[0], query)
         elif path.startswith("/css/") or path.startswith("/js/"):
             # Workbench static assets (static/css/, static/js/).
             self._serve_static(path.lstrip("/"))
         else:
-            # Everything else (/api/session, /_assets/*, SPA routes, ...) -> opencode.
-            self._proxy()
+            self._send_json({"error": "not found"}, 404)
 
-    do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = do_OPTIONS = _route
+    do_GET = do_HEAD = _route
 
     def log_message(self, fmt, *args):
         pass  # quiet
@@ -565,23 +467,14 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8080)
-    parser.add_argument("--opencode-url", default="http://127.0.0.1:4096")
-    parser.add_argument("--opencode-password",
-                        default=os.environ.get("OPENCODE_SERVER_PASSWORD", "workbench"))
     parser.add_argument("--dir", default="./scrapers",
                         help="directory to scan for result files (default: ./scrapers)")
     args = parser.parse_args()
 
-    upstream = urllib.parse.urlparse(args.opencode_url)
     Handler.root_dir = os.path.abspath(args.dir)
-    Handler.upstream_host = upstream.hostname or "127.0.0.1"
-    Handler.upstream_port = upstream.port or 4096
-    Handler.upstream_auth = "Basic " + base64.b64encode(
-        f"opencode:{args.opencode_password}".encode()).decode()
 
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    print(f"Workbench:  http://127.0.0.1:{args.port}  (opencode proxied at /?oc)")
-    print(f"Upstream:   {args.opencode_url}")
+    print(f"Workbench:  http://127.0.0.1:{args.port}")
     print(f"Watching:   {Handler.root_dir}")
     try:
         server.serve_forever()
