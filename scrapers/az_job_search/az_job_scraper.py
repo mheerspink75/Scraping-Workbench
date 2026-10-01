@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 import re
 import sys
 import time
+import urllib.parse
 
 try:
     from playwright.sync_api import sync_playwright
@@ -207,39 +208,49 @@ def fetch_page_with_backoff(session, url, params=None):
 
 
 def scrape_all():
-    session = requests.Session()
-    session.headers["User-Agent"] = "Mozilla/5.0"
-    session.headers["Accept-Language"] = "en-US,en;q=0.9"
+    if sync_playwright is None:
+        raise RuntimeError("Playwright is not installed. Run: pip install playwright && playwright install chromium")
 
     all_jobs = []
     seen_links = set()
 
-    for page in range(1, MAX_PAGES + 1):
-        params = {**SEARCH_PARAMS, "page": page}
-        print(f"[+] Fetching page {page} (polite delay: {REQUEST_DELAY}s)")
-        resp = fetch_page_with_backoff(session, BASE_URL, params=params)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(viewport={"width": 1400, "height": 1200})
+        
+        for page_num in range(1, MAX_PAGES + 1):
+            params = {**SEARCH_PARAMS, "page": page_num}
+            url = f"{BASE_URL}?{urllib.parse.urlencode(params)}"
+            print(f"[+] Fetching page {page_num} (polite delay: {REQUEST_DELAY}s)")
+            
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=REQUEST_TIMEOUT * 1000)
+                # Wait for cards to appear in case of AWS WAF redirect
+                page.wait_for_selector('article.card', timeout=15000)
+            except Exception as e:
+                print(f"[!] Error fetching page {page_num}: {e}")
 
-        if resp.status_code != 200:
-            print(f"[!] Page {page} failed ({resp.status_code})")
-            break
+            html = page.content()
+            jobs = extract_jobs_from_page(html)
+            
+            if not jobs:
+                print(f"[+] No jobs found on page {page_num}, stopping.")
+                break
 
-        jobs = extract_jobs_from_page(resp.text)
-        if not jobs:
-            print(f"[+] No jobs found on page {page}, stopping.")
-            break
+            new_jobs = []
+            for job in jobs:
+                if job["link"] not in seen_links:
+                    seen_links.add(job["link"])
+                    new_jobs.append(job)
 
-        new_jobs = []
-        for job in jobs:
-            if job["link"] not in seen_links:
-                seen_links.add(job["link"])
-                new_jobs.append(job)
+            if not new_jobs:
+                print(f"[+] Reached duplicate page content on page {page_num}, stopping.")
+                break
 
-        if not new_jobs:
-            print(f"[+] Reached duplicate page content on page {page}, stopping.")
-            break
+            all_jobs.extend(new_jobs)
+            time.sleep(REQUEST_DELAY)
 
-        all_jobs.extend(new_jobs)
-        time.sleep(REQUEST_DELAY)
+        browser.close()
 
     print(f"[+] Total jobs scraped: {len(all_jobs)}")
     return all_jobs
