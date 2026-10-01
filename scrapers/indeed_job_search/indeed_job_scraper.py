@@ -26,6 +26,12 @@ except ImportError:  # pragma: no cover - optional dependency
     sync_playwright = None
     PlaywrightTimeoutError = Exception
 
+try:
+    import asyncio
+    import nodriver as uc
+except ImportError:
+    uc = None
+
 BASE_URL = "https://www.indeed.com/jobs"
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 STATE_FILE = os.path.join(OUTPUT_DIR, ".browser-state.json")
@@ -89,7 +95,8 @@ def extract_jobs_from_page(html):
     soup = BeautifulSoup(html, "html.parser")
     jobs = []
     for card in soup.select("div.job_seen_beacon"):
-        title_link = card.select_one("h2.jobTitle a")
+        # Indeed currently uses h3.jobTitle with an anchor having class jcs-JobTitle
+        title_link = card.select_one("h3.jobTitle a") or card.select_one("h2.jobTitle a")
         if not title_link:
             continue
         title = " ".join(title_link.get_text(" ", strip=True).split())
@@ -114,6 +121,7 @@ def extract_jobs_from_page(html):
             "link": href,
         })
     return jobs
+
 
 
 def fetch_page_with_backoff(session, params):
@@ -212,48 +220,82 @@ def _wait_for_job_cards(page, headless, timeout_ms=180000):
 
 
 def scrape_all_browser(config):
-    """Fetch pages with a real browser (Playwright) instead of raw requests.
-
-    Recommended for Indeed: Cloudflare blocks most plain-requests traffic
-    (HTTP 403). On the first headed run a human may need to click the
-    Turnstile checkbox once; the resulting clearance cookie is saved to
-    output/.browser-state.json and reused afterwards.
+    """Fetch pages with nodriver (real Chrome, no automation flags) to bypass
+    Cloudflare Turnstile. On first run the browser window will open; if a
+    challenge appears wait for it to auto-solve or click it yourself.
     """
-    if sync_playwright is None:
-        raise RuntimeError(
-            "Playwright is not installed. Run: pip install playwright && playwright install chromium"
+    if uc is None:
+        raise RuntimeError("nodriver is not installed. Run: pip install nodriver")
+
+    async def _run():
+        browser = await uc.start(
+            headless=config.headless,
+            browser_executable_path="/usr/bin/google-chrome-stable",
         )
-
-    storage_state = STATE_FILE if os.path.exists(STATE_FILE) else None
-    if storage_state:
-        print("[browser] Reusing saved session state (Cloudflare clearance)")
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=config.headless)
-        ctx = browser.new_context(
-            viewport={"width": 1366, "height": 900},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                       "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-            locale="en-US",
-            timezone_id="America/Phoenix",
-            storage_state=storage_state,
-        )
-        page = ctx.new_page()
-
-        def fetch_html(params):
-            url = BASE_URL + "?" + urllib.parse.urlencode(params)
-            print(f"[browser] URL: {url}")
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            if not _wait_for_job_cards(page, config.headless):
-                print("[browser] No job cards (challenge unsolved?), stopping.")
-                return None
-            ctx.storage_state(path=STATE_FILE)
-            return page.content()
-
+        all_html = []
         try:
-            return scrape_pages(fetch_html, config)
+            page = await browser.get("about:blank")
+            for page_num in range(config.max_pages):
+                start = page_num * RESULTS_PER_PAGE
+                params = {
+                    "q": config.keywords,
+                    "l": config.location,
+                    "radius": 25,
+                    "sort": "date",
+                    "start": start,
+                }
+                url = BASE_URL + "?" + urllib.parse.urlencode(params)
+                print(f"[+] Fetching page {page_num + 1} (start={start})")
+                print(f"[browser] URL: {url}")
+                await page.get(url)
+
+                # Poll for job cards via JS — avoids nodriver find() which can
+                # block indefinitely. Waits up to 3 minutes so humans can solve
+                # any Turnstile challenge that appears in the browser window.
+                found = False
+                for tick in range(180):
+                    await asyncio.sleep(1)
+                    try:
+                        count = await page.evaluate(
+                            "document.querySelectorAll('div.job_seen_beacon').length"
+                        )
+                        if count and int(count) > 0:
+                            found = True
+                            break
+                    except Exception:
+                        pass
+                    if tick % 15 == 0:
+                        try:
+                            title = await page.evaluate("document.title")
+                            if title and "Just a moment" in str(title):
+                                print("  [challenge] Cloudflare check shown — click the "
+                                      "'Verify you are human' checkbox in the browser window...")
+                        except Exception:
+                            pass
+
+                if not found:
+                    print("[browser] No job cards after waiting — stopping early.")
+                    break
+
+                html = await page.get_content()
+                all_html.append(html)
+                print(f"[+] Page {page_num + 1} loaded OK, waiting {REQUEST_DELAY}s...")
+                await asyncio.sleep(REQUEST_DELAY)
         finally:
-            browser.close()
+            browser.stop()
+        return all_html
+
+
+    html_pages = asyncio.run(_run())
+
+    all_jobs = []
+    for html in html_pages:
+        jobs = extract_jobs_from_page(html)
+        all_jobs.extend(jobs)
+        print(f"[+] Page scraped: {len(jobs)} jobs found")
+    print(f"[+] Total jobs scraped: {len(all_jobs)}")
+    return all_jobs
+
 
 
 def filter_jobs(jobs):
