@@ -1,165 +1,309 @@
 # Scraping Workbench
 
-A web scraping results inspector:
+A local, run-oriented workspace for collecting, organizing, and inspecting web-scraping results.
 
-- **Run-oriented inspector** that recursively scans `scrapers/` and groups
-  complementary output files, summarizes data quality, and provides searchable
-  CSV/TSV tables, safe Markdown rendering, raw-file access, and record details.
+Scraping Workbench recursively discovers output under `scrapers/`, groups related files into result sets, summarizes data quality, and provides searchable tables, rendered reports, raw-file access, and record-level details through a browser interface. The repository also includes job-search scrapers and an optional, separately operated Copilot browser interaction stack.
 
-The workbench is standalone and has no opencode integration. Run scrapers from
-the terminal and open the viewer to inspect their output. If you want AI help
-writing or refining scrapers, use [opencode](https://opencode.ai) alongside it —
-`opencode pair` prints a link that signs a browser into your own local server.
+[View the repository on GitHub](https://github.com/mheerspink75/Scraping-Workbench)
 
-## Requirements
+<!-- Add a workbench screenshot here after saving it under docs/images/. -->
 
-- Python 3.10+ (the workbench itself is standard library only)
-- Scraper dependencies: `pip install -r requirements.txt playwright && playwright install chromium`
-  (a `.venv` is included in `.gitignore`; run scripts with `.venv/bin/python`)
-- Optional Copilot Browser Interaction Stack: Node.js 20+ and Playwright Chromium
-  (only the `browser-api/` service launches a browser)
+## Why Scraping Workbench?
 
-## Scrapers
+Scrapers commonly finish by writing raw CSV files or text reports that require separate tools to review. Scraping Workbench keeps the output workflow together: each scraper writes into its own `output/` directory, and the local inspector automatically turns supported files into searchable results and readable reports.
 
-| Folder | Site | Script |
-|--------|------|--------|
-| `scrapers/az_job_search/` | azjobconnection.gov | `az_job_scraper.py` |
-| `scrapers/linkedin_job_search/` | LinkedIn (guest API) | `linkedin_job_scraper.py` |
-| `scrapers/indeed_job_search/` | Indeed | `indeed_job_scraper.py` |
-| `scrapers/example/` | template | `scraper.py` — copy to start a new scraper |
+The workbench is standalone. It does not launch or proxy OpenCode, the Browser API, or the Copilot Bridge. Run scrapers separately, then use the inspector to review their output.
 
-All job scrapers support `--mode html` (fast `requests`) or `--mode browser`
-(Playwright Chromium — harder for LinkedIn/Indeed bot detection to block;
-Indeed mode runs headed so you can solve any Cloudflare challenge manually).
+## Key Features
 
-Each runs standalone (e.g. `python3 scrapers/indeed_job_search/indeed_job_scraper.py`)
-and writes `.md` + `.csv` results into its own `output/` folder, which the
-viewer picks up automatically. LinkedIn/Indeed actively rate-limit and block
-bots — expect occasional 429/403 responses; the scrapers back off and retry.
+- Recursively discovers `.md`, `.markdown`, `.csv`, `.tsv`, `.json`, and `.txt` files under `scrapers/`
+- Groups files with the same stem into complementary result views
+- Summarizes row counts, completeness, distributions, and source files
+- Provides paginated CSV and TSV tables with search, field filters, and sorting
+- Opens individual records in a focused detail drawer
+- Safely renders Markdown while preserving raw-file copy and download access
+- Refreshes only output whose revision has changed
+- Includes light and dark themes
+- Runs as a local, read-only results server bound to `127.0.0.1`
+- Includes an optional permission-gated browser automation stack
 
-## Quick start
+## How It Works
+
+```text
+Independent scrapers
+        |
+        v
+Markdown, CSV, TSV, JSON, or text output
+        |
+        v
+Scraping Workbench
+        |
+        v
+Search, summaries, reports, and record inspection
+```
+
+A scraper writes results into `scrapers/<name>/output/`. The workbench scans that tree and exposes the files through its local interface and read-only file API.
+
+## Quick Start
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/mheerspink75/Scraping-Workbench.git
+cd Scraping-Workbench
+```
+
+### 2. Create a virtual environment and install the base scraper dependencies
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
+The workbench itself uses the Python standard library. `requirements.txt` installs the shared scraper dependencies: Requests and Beautiful Soup.
+
+### 3. Start the inspector
 
 ```bash
 ./start_workbench.sh
 ```
 
-Then open <http://127.0.0.1:8080> in your browser. The script runs the inspector
-only; it does not start opencode or the browser services. Press `Ctrl+C` to stop
-it.
+Open [the local Scraping Workbench](http://127.0.0.1:8080) and press `Ctrl+C` in the terminal to stop it.
 
-### Configuration (environment variables)
+The launcher starts only the results inspector. It does not start a scraper, OpenCode, the Browser API, or the Copilot Bridge.
 
-| Variable       | Default     | Description                        |
-|----------------|-------------|------------------------------------|
-| `APP_PORT`     | `8080`      | Port of the workbench UI           |
-| `SCRAPERS_DIR` | `./scrapers`| Directory scanned for result files |
+## Included Scrapers
 
-## Routes
+| Folder | Target | Primary script | Browser implementation |
+|---|---|---|---|
+| `scrapers/az_job_search/` | Arizona Job Connection | `az_job_scraper.py` | Playwright Chromium |
+| `scrapers/linkedin_job_search/` | LinkedIn guest job API | `linkedin_job_scraper.py` | Playwright Chromium |
+| `scrapers/indeed_job_search/` | Indeed | `indeed_job_scraper.py` | nodriver with Google Chrome |
+| `scrapers/example/` | Starter template | `scraper.py` | Not required |
 
-The server is read-only and serves only its own UI, assets, and file API:
+The included job scrapers write Markdown and CSV output into their own `output/` directories. Job sites can change markup, enforce rate limits, or block automated clients, so scraper behavior may require maintenance over time.
 
-| Path                | Handled by                                       |
-|---------------------|--------------------------------------------------|
-| `/`                 | Workbench UI (`static/index.html`)               |
-| `/css/*`, `/js/*`   | Workbench static assets (`static/`)              |
-| `/api/files`        | Legacy flat file list                            |
-| `/api/runs`         | Run-oriented output metadata and revisions       |
-| `/api/file?path=..` | File content, table pagination, or raw output    |
-| anything else       | `404`                                            |
+### Browser dependencies
 
-The server binds only to `127.0.0.1` and makes no outbound network requests.
+Playwright is optional and is used by the Arizona and LinkedIn browser workflows:
 
-## Running manually
+```bash
+python -m pip install playwright
+python -m playwright install chromium
+```
+
+Indeed browser mode uses `nodriver` with Google Chrome rather than Playwright:
+
+```bash
+python -m pip install nodriver
+```
+
+The current Indeed implementation expects Google Chrome at `/usr/bin/google-chrome-stable`.
+
+### Run the Arizona scraper
+
+The default workflow uses Playwright to collect Arizona Job Connection search results:
+
+```bash
+python scrapers/az_job_search/az_job_scraper.py
+```
+
+After generating `az_jobs.csv`, browser mode can inspect individual job pages and write a filtered CSV:
+
+```bash
+python scrapers/az_job_search/az_job_scraper.py --mode browser
+```
+
+### Run the LinkedIn scraper
+
+```bash
+python scrapers/linkedin_job_search/linkedin_job_scraper.py
+```
+
+Useful options include:
+
+```bash
+python scrapers/linkedin_job_search/linkedin_job_scraper.py \
+  --remote \
+  --time-filter 30d \
+  --max-pages 5
+```
+
+Use Playwright browser mode when needed:
+
+```bash
+python scrapers/linkedin_job_search/linkedin_job_scraper.py --mode browser
+```
+
+LinkedIn rate-limits its guest endpoints aggressively. Keep crawls small and expect occasional HTTP 429 responses.
+
+### Run the Indeed scraper
+
+Fast HTTP mode is the default:
+
+```bash
+python scrapers/indeed_job_search/indeed_job_scraper.py
+```
+
+Use visible Chrome browser mode when Cloudflare blocks HTTP requests:
+
+```bash
+python scrapers/indeed_job_search/indeed_job_scraper.py --mode browser
+```
+
+If a human-verification challenge appears, complete it in the browser window. Headless mode cannot complete an interactive challenge.
+
+## Results Inspector
+
+Files with the same stem are grouped into one result set. For example, `jobs.csv` and `jobs.md` become complementary **Results** and **Report** views.
+
+Each result set can provide:
+
+- a run overview with row counts and completeness information;
+- value distributions and source-file metadata;
+- paginated CSV or TSV records;
+- full-text search, per-field filtering, and sorting;
+- record details in a side drawer;
+- rendered Markdown reports;
+- raw output for copying or downloading;
+- manual or automatic revision-aware refresh.
+
+## Configuration
+
+The launcher and `app.py` support these environment variables:
+
+| Variable | Default | Description |
+|---|---:|---|
+| `APP_PORT` | `8080` | Port used by the Workbench UI |
+| `SCRAPERS_DIR` | `./scrapers` | Directory scanned for result files |
+
+Run the server manually with equivalent command-line options:
 
 ```bash
 python3 app.py --port 8080 --dir ./scrapers
 ```
 
-## Project structure
+The server binds to `127.0.0.1` and makes no outbound network requests.
 
-```
+## Routes
+
+| Path | Purpose |
+|---|---|
+| `/` | Workbench interface from `static/index.html` |
+| `/css/*` and `/js/*` | Static application assets |
+| `/api/files` | Legacy flat file listing |
+| `/api/runs` | Run-oriented output metadata and revisions |
+| `/api/file?path=...` | File content, table pagination, or raw output |
+| Any other path | Returns `404` |
+
+## Technology Stack
+
+### Workbench
+
+- Python 3.10+
+- Python standard-library HTTP server
+- HTML, CSS, and JavaScript
+
+### Scrapers
+
+- Requests
+- Beautiful Soup
+- Playwright Chromium for the Arizona and LinkedIn browser workflows
+- nodriver and Google Chrome for Indeed browser mode
+
+### Browser API
+
+- Node.js 20+
+- TypeScript
+- Express
+- Playwright
+- Zod
+- QuickJS through `quickjs-emscripten`
+
+### Copilot Bridge
+
+- Node.js 20+
+- TypeScript
+- Express
+- Zod
+
+### Testing
+
+- Python `unittest`
+- TypeScript compilation and service-specific test runners
+- Real Chromium integration coverage in the Browser API test suite
+
+## Project Structure
+
+```text
 .
-├── app.py                 workbench server (UI + read-only file API)
-├── start_workbench.sh     launcher for the inspector
-├── requirements.txt       scraper Python dependencies
+├── app.py                     Workbench server and read-only file API
+├── start_workbench.sh         Inspector launcher
+├── requirements.txt           Shared Python scraper dependencies
 ├── static/
-│   ├── index.html         results inspector UI
-│   ├── css/style.css      responsive inspector design
-│   └── js/app.js          run navigation, summaries, tables, record details
-├── tests/test_app.py      workbench unit tests (stdlib unittest)
-├── browser-api/           permission-gated Playwright browser service
-├── copilot-bridge/        validated, fixed-route Copilot forwarding service
-└── scrapers/              one folder per website/scraper
-    └── example/           ← template: copy this to start a new scraper
-        ├── scraper.py     the scraper (writes results into ./output/)
-        └── output/        generated results, shown in the viewer (gitignored)
+│   ├── index.html             Results inspector interface
+│   ├── css/style.css          Responsive styling and themes
+│   └── js/app.js              Run navigation, tables, and record details
+├── tests/
+│   └── test_app.py            Workbench unit tests
+├── scrapers/
+│   ├── az_job_search/         Arizona Job Connection scraper
+│   ├── linkedin_job_search/   LinkedIn guest API scraper
+│   ├── indeed_job_search/     Indeed scraper
+│   └── example/               Starter scraper template
+├── browser-api/               Permission-gated Playwright browser service
+└── copilot-bridge/            Validated, fixed-route forwarding service
 ```
 
-### Adding a new scraper
+## Add a New Scraper
+
+Copy the example scraper and give it a dedicated output directory:
 
 ```bash
 mkdir -p scrapers/mysite/output
 cp scrapers/example/scraper.py scrapers/mysite/scraper.py
-# edit scrapers/mysite/scraper.py to target your site; write .md/.csv into ./output/
 ```
 
-Each `scrapers/<name>/scraper.py` must write its results into its own
-`output/` directory as Markdown and/or CSV — everything under `scrapers/`
-appears in the workbench viewer automatically.
+Update `scrapers/mysite/scraper.py` to target the desired source and write supported files into `scrapers/mysite/output/`.
 
-## Results inspector
+A minimal layout looks like this:
 
-The inspector recursively scans `scrapers/` (skipping hidden folders and files)
-for `.md`, `.markdown`, `.csv`, `.tsv`, `.json`, and `.txt` output. Files with
-the same stem are grouped into one result set—for example, `jobs.csv` and
-`jobs.md` become complementary **Results** and **Report** views.
+```text
+scrapers/mysite/
+├── scraper.py
+└── output/
+    ├── results.csv
+    └── results.md
+```
 
-Each result set provides:
-
-- a run overview with row counts, completeness, distributions, and source files;
-- paginated CSV/TSV results with full-text search, field filters, and sorting;
-- record details in a focused side drawer;
-- safely rendered Markdown plus copy/download access to unmodified raw output;
-- revision-aware manual or automatic refresh that only reloads changed output.
-
-The theme control switches the inspector between a light and dark workspace.
+Because the two output files share the `results` stem, the inspector groups them into one result set.
 
 ## Optional Copilot Browser Interaction Stack
 
-The repository also contains a separate, local browser interaction stack. Neither
-service references opencode or depends on its server URL, port, or password, so
-both run unchanged under opencode's default settings:
+The repository contains two separate local services for controlled browser interaction. They are independent of the results inspector and do not depend on an OpenCode URL, port, or password.
 
 ```text
 Copilot
-  │  POST /copilot/bridge (validated envelope)
-  ▼
-Copilot Bridge ── fixed 127.0.0.1:BROWSER_API_PORT ──► Browser API
-                                                               │
-                                                               ▼
-                                                isolated Playwright context
+  |
+  | POST /copilot/bridge
+  v
+Copilot Bridge
+  |
+  | fixed http://127.0.0.1:<BROWSER_API_PORT>
+  v
+Browser API
+  |
+  v
+Isolated Playwright browser context
 ```
 
-The two services have deliberately separate responsibilities:
-
-- [`browser-api/`](browser-api/) is the only component allowed to launch Chromium,
-  inspect pages, or execute browser operations. It creates an isolated context per
-  session, applies URL/network policy, and requires one-time permission tokens for
-  mutating operations.
-- [`copilot-bridge/`](copilot-bridge/) has no Playwright dependency and never
-  opens a browser. It validates the Copilot envelope and payload with strict Zod
-  schemas, maps only the ten approved logical endpoints, forwards selected
-  headers, and relays the Browser API response.
-
-The Bridge is stateless apart from an in-memory replay guard for permission
-tokens. It never generates, approves, extends, changes, or reuses a token. Human
-approval remains a separate control: approval/deny requests require an explicit
-`x-browser-approval-secret` header, and the Bridge does not automatically attach
-that secret for Copilot.
+- `browser-api/` is the only component that launches Chromium, inspects pages, or performs browser operations.
+- `copilot-bridge/` validates request envelopes, maps approved logical endpoints to fixed upstream routes, forwards selected headers, and relays responses.
+- Mutating browser operations require one-time permission tokens.
+- The Bridge does not launch a browser, evaluate JavaScript, mutate the DOM, navigate pages, or create approval tokens.
 
 ### Start the Browser API
-
-Use Node.js 20+ and install Chromium once:
 
 ```bash
 cd browser-api
@@ -170,23 +314,17 @@ npm run build
 export BROWSER_API_PORT=8787
 export BROWSER_API_SECRET='use-a-long-random-secret'
 export BROWSER_APPROVAL_SECRET='use-a-separate-approval-secret'
+
 npm start
 ```
 
-The API binds to `127.0.0.1:8787` by default and starts with no environment
-variables set at all — `BROWSER_API_SECRET` and `BROWSER_APPROVAL_SECRET` both
-default to empty, which means no API secret is required and approval endpoints
-return `503 APPROVAL_DISABLED`. Set them before exposing the API beyond your own
-account.
+The Browser API binds to `127.0.0.1:8787` by default. When `BROWSER_API_SECRET` and `BROWSER_APPROVAL_SECRET` are empty, no API secret is required and approval endpoints return `503 APPROVAL_DISABLED`.
 
-Keep it private; the Bridge is the supported Copilot-facing entry point. See
-[`browser-api/README.md`](browser-api/README.md) for the complete endpoint,
-permission, sandbox, and deployment documentation.
+See the [Browser API documentation](browser-api/README.md) for endpoint, permission, sandbox, and deployment details.
 
 ### Start the Copilot Bridge
 
-In a second terminal, use the same `BROWSER_API_SECRET` and
-`BROWSER_APPROVAL_SECRET` values that were configured for the Browser API:
+In a second terminal:
 
 ```bash
 cd copilot-bridge
@@ -197,24 +335,20 @@ export BROWSER_API_PORT=8787
 export BRIDGE_PORT=8790
 export BROWSER_API_SECRET='use-a-long-random-secret'
 export BROWSER_APPROVAL_SECRET='use-a-separate-approval-secret'
-export BRIDGE_API_SECRET='secret-for-copilot-to-call-the-bridge' # optional
+export BRIDGE_API_SECRET='secret-for-copilot-to-call-the-bridge'
+
 npm start
 ```
 
-The Bridge binds to `127.0.0.1:8790` and defaults its upstream to
-`http://127.0.0.1:8787`. Payloads cannot select a host, port, path, HTTP method,
-or redirect target. `BROWSER_API_SECRET` and `BROWSER_APPROVAL_SECRET` must match
-the values the Browser API was started with.
+The Bridge binds to `127.0.0.1:8790` by default and forwards only to `http://127.0.0.1:<BROWSER_API_PORT>`. Request payloads cannot select an arbitrary host, port, route, HTTP method, or redirect target.
 
-`BRIDGE_API_SECRET` is optional and empty by default, meaning any local caller
-may post to `/copilot/bridge`. Configure it when Copilot is not running under the
-same trusted local account; callers then send `x-bridge-api-secret`.
+`BRIDGE_API_SECRET` is optional and empty by default. Configure it when callers outside the same trusted local account can reach the Bridge.
 
-### Copilot request flow
+See the [Copilot Bridge documentation](copilot-bridge/README.md) for the logical endpoint allowlist and route mappings.
 
-Start a session through the fixed envelope, then pass the returned UUID in
-`x-browser-session` for session-scoped calls. For example, after
-`browser.session.start` returns a session UUID:
+### Request flow
+
+Start a session through the fixed envelope, then include the returned session UUID in `x-browser-session` for session-scoped requests:
 
 ```http
 POST /copilot/bridge
@@ -231,47 +365,107 @@ x-browser-session: <session UUID>
 }
 ```
 
-The `x-bridge-api-secret` header is required only when `BRIDGE_API_SECRET` is
-configured; the session start request itself does not need a session header.
+The `x-bridge-api-secret` header is required only when `BRIDGE_API_SECRET` is configured. A session-start request does not need a session header.
 
-A mutating `browser.action` or `browser.eval` request needs exactly one
-permission-token channel: `x-permission-token` or `payload.permissionToken`.
-Every mutating workflow step needs its own token; there is no workflow-wide
-bypass. Read-only actions must not carry tokens. Unknown endpoints are rejected
-before any network request.
+A mutating `browser.action` or `browser.eval` request must supply exactly one permission-token channel: `x-permission-token` or `payload.permissionToken`. Read-only requests must not include a permission token.
 
-The logical endpoint allowlist and exact upstream routes are documented in
-[`copilot-bridge/README.md`](copilot-bridge/README.md). The Bridge does not
-import Playwright, evaluate JavaScript, mutate the DOM, navigate pages, or
-create approval tokens.
-
-### Health and verification
+### Health check
 
 With both services running:
 
 ```bash
 curl http://127.0.0.1:8790/copilot/bridge/health
-# {"status":"ok","browserApiReachable":true}
 ```
 
-Run the service checks independently:
+Expected response:
 
-```bash
-(cd browser-api && npm run lint && npm test)
-(cd copilot-bridge && npm run lint && npm test)
+```json
+{"status":"ok","browserApiReachable":true}
 ```
 
-The Browser API tests include real Chromium integration coverage. In WSL, the
-included `run-linux.sh` wrappers select a native Linux Node binary from `PATH` or
-`~/.vscode-server/bin` and avoid Windows UNC-path issues:
+## Security Design
 
-```bash
-(cd browser-api && ./run-linux.sh test)
-(cd copilot-bridge && ./run-linux.sh test)
-```
+- The Workbench server is read-only and serves only its interface, assets, and file API.
+- The Workbench and optional browser services bind to local loopback addresses by default.
+- The Browser API owns browser execution and creates isolated browser contexts.
+- The Copilot Bridge has no Playwright dependency and cannot launch Chromium.
+- Bridge payloads cannot choose arbitrary upstream network destinations.
+- Unknown logical endpoints are rejected before an upstream request.
+- Mutating browser operations require individual one-time permission tokens.
+- Approval and denial requests require the separate browser approval secret when approvals are enabled.
 
-The workbench itself has no build step and is tested with `unittest`:
+Keep the Browser API and Copilot Bridge private unless you have added appropriate host-level access controls and configured non-empty secrets.
+
+## Testing
+
+### Workbench
 
 ```bash
 python3 -m unittest discover -s tests
 ```
+
+### Browser API
+
+```bash
+cd browser-api
+npm run lint
+npm test
+```
+
+The Browser API also exposes separate commands:
+
+```bash
+npm run test:unit
+npm run test:integration
+```
+
+### Copilot Bridge
+
+```bash
+cd copilot-bridge
+npm run lint
+npm test
+```
+
+The Bridge also exposes separate commands:
+
+```bash
+npm run test:unit
+npm run test:integration
+```
+
+### WSL wrappers
+
+The included wrappers select a native Linux Node binary from `PATH` or `~/.vscode-server/bin` and avoid Windows UNC-path issues:
+
+```bash
+(cd browser-api && ./run-linux.sh lint && ./run-linux.sh test)
+(cd copilot-bridge && ./run-linux.sh lint && ./run-linux.sh test)
+```
+
+## Roadmap
+
+Potential future improvements include:
+
+- Additional scraper plugins
+- Scheduled scraper runs
+- Historical run comparison
+- Optional persistent storage
+- Export workflows
+- Additional result analytics and visualizations
+
+Roadmap items are ideas, not committed features.
+
+## Responsible Use
+
+Use the scrapers only where permitted. Review each website's terms, robots guidance, access controls, and applicable laws before collecting data. Keep request volume conservative, respect rate limits, and do not use this project to bypass authentication or authorization.
+
+## License
+
+This project is available under the [MIT License](LICENSE).
+
+## Author
+
+**Matt Heerspink**
+
+[GitHub Profile](https://github.com/mheerspink75)
