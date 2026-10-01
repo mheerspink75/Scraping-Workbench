@@ -6,7 +6,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if command -v node >/dev/null 2>&1 && node -p "process.platform === 'linux'" >/dev/null 2>&1; then
   NODE_BIN="$(command -v node)"
 else
-  NODE_BIN="$(find /home/mico/.vscode-server/bin -maxdepth 2 -type f -name node -perm -111 2>/dev/null | sort -V | tail -n 1 || true)"
+  # Fall back to a native Linux Node inside a WSL-hosted VS Code server.
+  NODE_BIN="$(find "${HOME}/.vscode-server/bin" -maxdepth 2 -type f -name node -perm -111 2>/dev/null | sort -V | tail -n 1 || true)"
 fi
 
 if [[ -z "$NODE_BIN" || ! -x "$NODE_BIN" ]]; then

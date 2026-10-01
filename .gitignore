@@ -6,7 +6,6 @@ venv/
 
 # Environment / secrets
 .env
-.server-password
 
 # Scrape results (generated, not source) — keep the output folders themselves
 scrapers/*/output/*

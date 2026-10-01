@@ -9,7 +9,9 @@ SCRAPERS_DIR="${SCRAPERS_DIR:-./scrapers}"
 
 cleanup() {
   echo "Shutting down..."
-  kill "${APP_PID:-}" 2>/dev/null || true
+  if [[ -n "${APP_PID:-}" ]]; then
+    kill "${APP_PID}" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT INT TERM
 

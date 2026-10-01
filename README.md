@@ -43,14 +43,16 @@ bots — expect occasional 429/403 responses; the scrapers back off and retry.
 ./start_workbench.sh
 ```
 
-Then open <http://127.0.0.1:8080> in your browser.
+Then open <http://127.0.0.1:8080> in your browser. The script runs the inspector
+only; it does not start opencode or the browser services. Press `Ctrl+C` to stop
+it.
 
 ### Configuration (environment variables)
 
-| Variable       | Default   | Description                        |
-|----------------|-----------|------------------------------------|
-| `APP_PORT`     | `8080`    | Port of the workbench UI           |
-| `SCRAPERS_DIR` | `./scrapers` | Directory scanned for result files |
+| Variable       | Default     | Description                        |
+|----------------|-------------|------------------------------------|
+| `APP_PORT`     | `8080`      | Port of the workbench UI           |
+| `SCRAPERS_DIR` | `./scrapers`| Directory scanned for result files |
 
 ## Routes
 
@@ -76,16 +78,17 @@ python3 app.py --port 8080 --dir ./scrapers
 ## Project structure
 
 ```
-scrapers/
+.
 ├── app.py                 workbench server (UI + read-only file API)
-├── start_workbench.sh     launcher
+├── start_workbench.sh     launcher for the inspector
+├── requirements.txt       scraper Python dependencies
 ├── static/
 │   ├── index.html         results inspector UI
 │   ├── css/style.css      responsive inspector design
 │   └── js/app.js          run navigation, summaries, tables, record details
+├── tests/test_app.py      workbench unit tests (stdlib unittest)
 ├── browser-api/           permission-gated Playwright browser service
 ├── copilot-bridge/        validated, fixed-route Copilot forwarding service
-├── tests/                 workbench and integration tests
 └── scrapers/              one folder per website/scraper
     └── example/           ← template: copy this to start a new scraper
         ├── scraper.py     the scraper (writes results into ./output/)
@@ -123,7 +126,9 @@ The theme control switches the inspector between a light and dark workspace.
 
 ## Optional Copilot Browser Interaction Stack
 
-The repository also contains a separate, local browser interaction stack:
+The repository also contains a separate, local browser interaction stack. Neither
+service references opencode or depends on its server URL, port, or password, so
+both run unchanged under opencode's default settings:
 
 ```text
 Copilot
@@ -168,8 +173,13 @@ export BROWSER_APPROVAL_SECRET='use-a-separate-approval-secret'
 npm start
 ```
 
-The API binds to `127.0.0.1` by default. Keep it private; the Bridge is the
-supported Copilot-facing entry point. See
+The API binds to `127.0.0.1:8787` by default and starts with no environment
+variables set at all — `BROWSER_API_SECRET` and `BROWSER_APPROVAL_SECRET` both
+default to empty, which means no API secret is required and approval endpoints
+return `503 APPROVAL_DISABLED`. Set them before exposing the API beyond your own
+account.
+
+Keep it private; the Bridge is the supported Copilot-facing entry point. See
 [`browser-api/README.md`](browser-api/README.md) for the complete endpoint,
 permission, sandbox, and deployment documentation.
 
@@ -191,10 +201,14 @@ export BRIDGE_API_SECRET='secret-for-copilot-to-call-the-bridge' # optional
 npm start
 ```
 
-The Bridge always uses `http://127.0.0.1:<BROWSER_API_PORT>` as its upstream
-origin. Payloads cannot select a host, port, path, HTTP method, or redirect
-target. Configure `BRIDGE_API_SECRET` when Copilot is not running on the same
-trusted local account; callers then send `x-bridge-api-secret`.
+The Bridge binds to `127.0.0.1:8790` and defaults its upstream to
+`http://127.0.0.1:8787`. Payloads cannot select a host, port, path, HTTP method,
+or redirect target. `BROWSER_API_SECRET` and `BROWSER_APPROVAL_SECRET` must match
+the values the Browser API was started with.
+
+`BRIDGE_API_SECRET` is optional and empty by default, meaning any local caller
+may post to `/copilot/bridge`. Configure it when Copilot is not running under the
+same trusted local account; callers then send `x-bridge-api-secret`.
 
 ### Copilot request flow
 
@@ -248,10 +262,16 @@ Run the service checks independently:
 ```
 
 The Browser API tests include real Chromium integration coverage. In WSL, the
-included `run-linux.sh` wrappers select a native Linux Node binary and avoid
-Windows UNC-path issues:
+included `run-linux.sh` wrappers select a native Linux Node binary from `PATH` or
+`~/.vscode-server/bin` and avoid Windows UNC-path issues:
 
 ```bash
 (cd browser-api && ./run-linux.sh test)
 (cd copilot-bridge && ./run-linux.sh test)
+```
+
+The workbench itself has no build step and is tested with `unittest`:
+
+```bash
+python3 -m unittest discover -s tests
 ```
